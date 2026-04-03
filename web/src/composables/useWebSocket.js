@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 
 const AGENT_WS_URL = 'ws://localhost:8080/ws'
-const MOCK_MODE = true // Set to false when Agent WebSocket is available
+const MOCK_MODE = false // Set to true for frontend-only development
 
 // Mock responses for frontend development
 const MOCK_RESPONSES = [

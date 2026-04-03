@@ -11,13 +11,15 @@ from agent.skills import build_system_prompt
 
 
 def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
-        model: str = "qwen/qwen-plus", max_rounds: int = 10) -> str:
+        model: str = "qwen/qwen-plus", max_rounds: int = 10) -> dict:
     """Execute the agent loop: LLM reasoning with tool dispatch.
 
-    Returns the final text reply from the LLM.
+    Returns {"content": str, "artifacts": list[dict]} where artifacts are
+    tool results that have type/summary/data fields (for frontend display).
     """
     system_msg = {"role": "system", "content": build_system_prompt()}
     tools = mcp_client.get_tools_for_llm()
+    artifacts = []
 
     for _ in range(max_rounds):
         response = litellm.completion(
@@ -31,7 +33,7 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
 
         # No tool calls => final answer
         if not msg.tool_calls:
-            return msg.content or ""
+            return {"content": msg.content or "", "artifacts": artifacts}
 
         # Process each tool call
         for tc in msg.tool_calls:
@@ -54,6 +56,15 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
                     parsed = json.loads(raw)
                     parsed = harness.after_call(name, parsed)
                     result = json.dumps(parsed, ensure_ascii=False)
+                    # Collect artifacts from tool results
+                    if isinstance(parsed, dict) and "summary" in parsed:
+                        artifacts.append({
+                            "title": f"{name} result",
+                            "type": parsed.get("type", "numerical"),
+                            "summary": parsed.get("summary", ""),
+                            "data": parsed.get("data"),
+                            "output_files": parsed.get("output_files", []),
+                        })
                 except json.JSONDecodeError:
                     result = raw
             else:
@@ -65,4 +76,4 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
                 "content": result,
             })
 
-    return "Maximum rounds reached."
+    return {"content": "Maximum rounds reached.", "artifacts": artifacts}
