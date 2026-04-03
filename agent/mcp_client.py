@@ -3,6 +3,9 @@
 import asyncio
 import json
 
+import nest_asyncio
+nest_asyncio.apply()  # Allow asyncio.run() inside existing event loop (uvicorn)
+
 from mcp.client.sse import sse_client
 from mcp import ClientSession
 
