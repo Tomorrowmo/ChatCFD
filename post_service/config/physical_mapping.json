@@ -1,0 +1,96 @@
+{
+  "pressure": {
+    "standard_name": "pressure",
+    "display_name": "Pressure",
+    "unit": "Pa",
+    "aliases": [
+      "Pressure",
+      "Static_Pressure",
+      "p",
+      "PRES",
+      "pressure"
+    ]
+  },
+  "density": {
+    "standard_name": "density",
+    "display_name": "Density",
+    "unit": "kg/m^3",
+    "aliases": [
+      "Density",
+      "rho",
+      "DENS",
+      "density"
+    ]
+  },
+  "velocity_x": {
+    "standard_name": "velocity_x",
+    "display_name": "Velocity X",
+    "unit": "m/s",
+    "aliases": [
+      "X_Velocity",
+      "VelocityX",
+      "Ux",
+      "U_X",
+      "velocity_x"
+    ]
+  },
+  "velocity_y": {
+    "standard_name": "velocity_y",
+    "display_name": "Velocity Y",
+    "unit": "m/s",
+    "aliases": [
+      "Y_Velocity",
+      "VelocityY",
+      "Uy",
+      "U_Y",
+      "velocity_y"
+    ]
+  },
+  "velocity_z": {
+    "standard_name": "velocity_z",
+    "display_name": "Velocity Z",
+    "unit": "m/s",
+    "aliases": [
+      "Z_Velocity",
+      "VelocityZ",
+      "Uz",
+      "U_Z",
+      "velocity_z"
+    ]
+  },
+  "temperature": {
+    "standard_name": "temperature",
+    "display_name": "Temperature",
+    "unit": "K",
+    "aliases": [
+      "Temperature",
+      "Static_Temperature",
+      "T",
+      "TEMP",
+      "temperature"
+    ]
+  },
+  "mach": {
+    "standard_name": "mach",
+    "display_name": "Mach Number",
+    "unit": "",
+    "aliases": [
+      "Mach_Number",
+      "Mach",
+      "Ma",
+      "mach"
+    ]
+  },
+  "cp": {
+    "standard_name": "cp",
+    "display_name": "Pressure Coefficient",
+    "unit": "",
+    "aliases": [
+      "Pressure_Coefficient",
+      "CoefPressure",
+      "Cp",
+      "cp",
+      "C_P"
+    ]
+  }
+}
