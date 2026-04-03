@@ -1,0 +1,20 @@
+# 大文件 / 二进制
+linux/
+*.tar
+*.tar.gz
+
+# PRD 副本
+docs/chatcfd-prd copy.md
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
