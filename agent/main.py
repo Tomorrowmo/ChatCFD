@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 
 import uvicorn
 from dotenv import load_dotenv
@@ -22,10 +23,10 @@ MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000/mcp/sse")
 LOG_DIR = os.environ.get("LOG_DIR", ".chatcfd")
 AGENT_PORT = int(os.environ.get("AGENT_PORT", "8080"))
 
-# --- Shared state (initialized on startup) ---
-mcp_client: MCPClient = None
-harness: Harness = None
-pool: SessionPool = None
+# --- Shared state (initialized before server starts) ---
+mcp_client = MCPClient(MCP_URL)
+harness = Harness(max_file_size_mb=int(os.environ.get("MAX_FILE_SIZE_MB", "2048")))
+pool = SessionPool()
 
 # --- FastAPI app ---
 app = FastAPI(title="ChatCFD Agent")
@@ -35,16 +36,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def startup():
-    global mcp_client, harness, pool
-    mcp_client = MCPClient(MCP_URL)
-    mcp_client.load_tools()
-    print(f"[Agent] Loaded {len(mcp_client._tools_raw)} MCP tools: {list(mcp_client._tool_names)}")
-    harness = Harness()
-    pool = SessionPool()
 
 
 @app.websocket("/ws")
@@ -65,14 +56,17 @@ async def websocket_endpoint(ws: WebSocket):
 
             session.messages.append({"role": "user", "content": query})
 
-            # Run agent loop (blocking — OK for Phase 1, async in Phase 2)
-            result = agent_loop.run(session, mcp_client, harness, model=MODEL)
-
-            # Send response to frontend
-            await ws.send_json({
-                "content": result.get("content", ""),
-                "artifacts": result.get("artifacts", []),
-            })
+            try:
+                result = agent_loop.run(session, mcp_client, harness, model=MODEL)
+                await ws.send_json({
+                    "content": result.get("content", ""),
+                    "artifacts": result.get("artifacts", []),
+                })
+            except Exception as e:
+                await ws.send_json({
+                    "content": f"Error: {e}",
+                    "artifacts": [],
+                })
 
             insight_log.log_query(
                 LOG_DIR, session_id, query,
@@ -88,20 +82,16 @@ async def websocket_endpoint(ws: WebSocket):
 def health():
     return {
         "status": "ok",
-        "tools": len(mcp_client._tools_raw) if mcp_client else 0,
+        "tools": len(mcp_client._tools_raw),
         "model": MODEL,
     }
 
 
 # --- CLI mode (fallback) ---
 def cli():
-    global mcp_client, harness, pool
-    mcp_client = MCPClient(MCP_URL)
     mcp_client.load_tools()
     print(f"Loaded {len(mcp_client._tools_raw)} MCP tools: {list(mcp_client._tool_names)}")
 
-    harness = Harness()
-    pool = SessionPool()
     session = pool.get_or_create("cli")
 
     print("ChatCFD Agent CLI (type 'q' to quit)\n")
@@ -124,10 +114,12 @@ def cli():
 
 
 if __name__ == "__main__":
-    import sys
     if "--cli" in sys.argv:
         cli()
     else:
+        # Load MCP tools BEFORE starting uvicorn
+        mcp_client.load_tools()
+        print(f"[Agent] Loaded {len(mcp_client._tools_raw)} MCP tools: {list(mcp_client._tool_names)}")
         print(f"[Agent] Starting WebSocket server on port {AGENT_PORT}")
         print(f"[Agent] Post service at {MCP_URL}")
         print(f"[Agent] LLM model: {MODEL}")

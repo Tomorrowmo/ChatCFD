@@ -5,7 +5,7 @@ import os
 
 
 class Harness:
-    def __init__(self, path_whitelist=None, max_file_size_mb=50, max_return_chars=5000):
+    def __init__(self, path_whitelist=None, max_file_size_mb=2048, max_return_chars=5000):
         self.path_whitelist = [
             os.path.normpath(p).replace("\\", "/")
             for p in (path_whitelist or [])
