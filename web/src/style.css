@@ -1,0 +1,85 @@
+:root {
+  --bg-primary: #1a1b23;
+  --bg-secondary: #22232d;
+  --bg-tertiary: #2a2b37;
+  --bg-input: #2e2f3b;
+  --bg-hover: #333442;
+  --bg-user-msg: #2563eb;
+  --bg-ai-msg: #2a2b37;
+  --text-primary: #e4e5ed;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --border: #363848;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --shadow: rgba(0, 0, 0, 0.3) 0 4px 12px;
+
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, Consolas, 'Courier New', monospace;
+
+  font: 14px/1.5 var(--sans);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Monospace for data values */
+.mono {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+/* Utility */
+.truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  outline: none;
+  font-family: var(--sans);
+  font-size: 14px;
+}
+
+textarea {
+  font-family: var(--sans);
+  font-size: 14px;
+}
