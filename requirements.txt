@@ -1,0 +1,17 @@
+# ChatCFD Phase 1 Dependencies
+
+# -- Post Service --
+fastapi>=0.104.0
+uvicorn>=0.24.0
+fastmcp>=0.1.0
+numpy>=1.24.0
+# vtk==9.4.1  # installed via conda (PostProcessTool env), includes custom C++ modules
+
+# -- Agent --
+litellm>=1.0.0
+mcp>=1.0.0
+python-dotenv>=1.0.0
+
+# -- Dev / Test --
+pytest>=7.0.0
+httpx>=0.25.0
