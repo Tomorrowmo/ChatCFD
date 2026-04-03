@@ -17,14 +17,38 @@ class PostEngine:
         if algorithms_dir:
             self.registry.scan_and_load(algorithms_dir)
 
+    # File extension → RomtekIODriver reader name mapping
+    _READER_MAP = {
+        ".cgns": "CGNSReader",
+        ".cga": "CGNSReader",
+        ".plt": "TecplotReader",
+        ".dat": "TecplotReader",
+        ".case": "EnsightReader",
+        ".vtm": "VTKVTMReader",
+        ".vts": "VTKVTSReader",
+        ".vtu": "VTKVTUReader",
+        ".vtp": "VTKVTPReader",
+    }
+
     def load_file(self, session_id: str, file_path: str) -> dict:
         file_path = os.path.normpath(file_path).replace("\\", "/")
         if not os.path.exists(file_path):
             return {"error": f"File not found: {file_path}"}
+
+        # Auto-detect reader from extension
+        _, ext = os.path.splitext(file_path)
+        ext = ext.lower()
+        reader_name = self._READER_MAP.get(ext, "")
+        if not reader_name:
+            supported = list(self._READER_MAP.keys())
+            return {"error": f"Unsupported format: {ext}. Supported: {supported}"}
+
         try:
             reader = vtk.vtkRomtekIODriver()
-            reader.ReadFiles(file_path, "", False)
+            reader.ReadFiles([file_path], reader_name, False)  # list, not string!
             multiblock = reader.getOutPut()
+            if multiblock is None:
+                return {"error": f"Reader returned no data for: {file_path}"}
         except Exception as e:
             return {"error": f"Failed to read file: {e}"}
         post_data = PostData(multiblock, file_path)
