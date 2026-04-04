@@ -57,13 +57,12 @@ async def websocket_endpoint(ws: WebSocket):
             session.messages.append({"role": "user", "content": query})
 
             try:
-                result = agent_loop.run(session, mcp_client, harness, model=MODEL)
-                await ws.send_json({
-                    "content": result.get("content", ""),
-                    "artifacts": result.get("artifacts", []),
-                })
+                # Stream tokens to frontend
+                for event in agent_loop.stream_run(session, mcp_client, harness, model=MODEL):
+                    await ws.send_json(event)
             except Exception as e:
                 await ws.send_json({
+                    "type": "done",
                     "content": f"Error: {e}",
                     "artifacts": [],
                 })

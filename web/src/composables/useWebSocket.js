@@ -89,7 +89,7 @@ function createMockWebSocket() {
 }
 
 function createRealWebSocket() {
-  const { addMessage, addArtifact } = useChatStore()
+  const { addArtifact, appendToStreaming, finalizeStreaming } = useChatStore()
   const ws = ref(null)
   let reconnectTimer = null
 
@@ -109,16 +109,36 @@ function createRealWebSocket() {
     ws.value.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        const artifactRefs = []
 
-        if (data.artifacts) {
-          for (const art of data.artifacts) {
-            const added = addArtifact(art)
-            artifactRefs.push({ id: added.id, title: added.title })
+        if (data.type === 'token') {
+          // Streaming text token — append to current message
+          appendToStreaming(data.content)
+        } else if (data.type === 'tool_start') {
+          // Tool execution started — show status
+          appendToStreaming(`\n> Calling ${data.tool}...\n`)
+        } else if (data.type === 'tool_result') {
+          // Tool finished — clear the "calling..." text will be replaced by final content
+        } else if (data.type === 'done') {
+          // Final message — add artifacts and finalize
+          const artifactRefs = []
+          if (data.artifacts) {
+            for (const art of data.artifacts) {
+              const added = addArtifact(art)
+              artifactRefs.push({ id: added.id, title: added.title })
+            }
           }
+          finalizeStreaming(data.content, artifactRefs)
+        } else {
+          // Legacy non-streaming format (fallback)
+          const artifactRefs = []
+          if (data.artifacts) {
+            for (const art of data.artifacts) {
+              const added = addArtifact(art)
+              artifactRefs.push({ id: added.id, title: added.title })
+            }
+          }
+          finalizeStreaming(data.content || '', artifactRefs)
         }
-
-        addMessage('assistant', data.content || '', artifactRefs)
       } catch (err) {
         console.error('[WebSocket] Failed to parse message:', err)
       }
