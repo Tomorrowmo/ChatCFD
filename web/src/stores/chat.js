@@ -30,6 +30,11 @@ export function useChatStore() {
   }
 
   function addArtifact(artifact) {
+    // Derive file_path from output_files if not explicitly set
+    let filePath = artifact.file_path || null
+    if (!filePath && artifact.output_files && artifact.output_files.length > 0) {
+      filePath = artifact.output_files[0]
+    }
     const a = {
       id: nextArtifactId++,
       title: artifact.title || 'Untitled',
@@ -37,7 +42,7 @@ export function useChatStore() {
       summary: artifact.summary || '',
       data: artifact.data || null,
       output_files: artifact.output_files || [],
-      file_path: artifact.file_path || null,
+      file_path: filePath,
       created_at: new Date().toISOString(),
     }
     state.artifacts.push(a)

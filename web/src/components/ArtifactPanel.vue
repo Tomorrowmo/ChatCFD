@@ -16,6 +16,7 @@ const viewerType = computed(() => {
   if (art.type === 'file' && art.file_path) {
     if (art.file_path.endsWith('.csv')) return 'table'
     if (art.file_path.endsWith('.vtm') || art.file_path.endsWith('.vtp')) return 'vtk'
+    if (art.file_path.endsWith('.png') || art.file_path.endsWith('.jpg')) return 'image'
   }
   return 'json'
 })
@@ -49,6 +50,13 @@ const viewerType = computed(() => {
       <VtkViewer
         v-else-if="viewerType === 'vtk'"
         :path="activeArtifact.file_path"
+      />
+
+      <img
+        v-else-if="viewerType === 'image'"
+        :src="`http://localhost:8000/api/file/${activeArtifact.file_path}`"
+        class="artifact-image"
+        :alt="activeArtifact.title"
       />
     </div>
 
@@ -108,5 +116,11 @@ const viewerType = computed(() => {
 
 .viewer-hint {
   font-size: 12px;
+}
+
+.artifact-image {
+  max-width: 100%;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
 }
 </style>

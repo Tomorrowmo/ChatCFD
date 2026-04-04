@@ -14,7 +14,7 @@ export function useApi() {
   }
 
   async function downloadFile(path) {
-    const resp = await fetch(`${BASE_URL}/api/file?path=${encodeURIComponent(path)}`)
+    const resp = await fetch(`${BASE_URL}/api/file/${encodeURIComponent(path)}`)
     if (!resp.ok) throw new Error(`downloadFile failed: ${resp.status}`)
     return await resp.blob()
   }
