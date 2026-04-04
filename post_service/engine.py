@@ -6,6 +6,7 @@ import os
 import vtk
 
 from post_service.algorithm_registry import AlgorithmRegistry
+from post_service.archive import AnalysisArchive
 from post_service.post_data import PostData
 from post_service.session import SessionManager
 
@@ -57,7 +58,10 @@ class PostEngine:
             state = self.session_mgr.create(session_id)
         state.post_data = post_data
         state.output_dir = os.path.dirname(file_path)
-        return post_data.get_summary()
+        summary = post_data.get_summary()
+        archive_info = AnalysisArchive.check_consistency(file_path)
+        summary["archive"] = archive_info
+        return summary
 
     def calculate(self, session_id: str, method: str, params: dict, zone_name: str) -> dict:
         state = self.session_mgr.get(session_id)
@@ -155,6 +159,33 @@ class PostEngine:
                 "defaults": entry["defaults"],
             }
         return {"methods": self.registry.list_methods()}
+
+    def save_archive(self, session_id, method, zone, params, result, note=""):
+        """Save an analysis result entry to the archive (user-triggered only)."""
+        state = self.session_mgr.get(session_id)
+        if state is None or state.post_data is None:
+            return {"error": "No file loaded."}
+        path = AnalysisArchive.save_entry(
+            state.post_data.file_path, method, zone, params, result, note
+        )
+        archive = AnalysisArchive.load(state.post_data.file_path)
+        return {
+            "summary": f"已保存到 {path}",
+            "entries_count": len(archive["entries"]),
+        }
+
+    def get_archive(self, session_id):
+        """Retrieve the archive history for the currently loaded file."""
+        state = self.session_mgr.get(session_id)
+        if state is None or state.post_data is None:
+            return {"error": "No file loaded."}
+        archive = AnalysisArchive.load(state.post_data.file_path)
+        if archive is None:
+            return {"summary": "该文件没有历史分析存档", "entries": []}
+        return {
+            "summary": f"找到 {len(archive['entries'])} 条历史记录",
+            "entries": archive["entries"],
+        }
 
     def get_mesh_geometry(self, session_id: str, zone: str):
         """Return mesh point coordinates as raw bytes, or None."""
