@@ -79,7 +79,26 @@ class PostEngine:
         state = self.session_mgr.get(session_id)
         if state is None or state.post_data is None:
             return {"error": "No file loaded."}
-        return {"error": "compare not yet fully implemented in Phase 1"}
+
+        # Phase 1: same-file zone comparison. Parse "zone:scalar" format.
+        if ":" not in source_a or ":" not in source_b:
+            return {"error": "source_a and source_b must use 'zone:scalar' format (e.g. 'wall:Pressure')."}
+
+        zone_a, scalar_a = source_a.split(":", 1)
+        zone_b, scalar_b = source_b.split(":", 1)
+
+        if scalar_a != scalar_b:
+            return {"error": f"Scalar mismatch: '{scalar_a}' vs '{scalar_b}'. Phase 1 only supports comparing the same scalar across zones."}
+
+        entry = self.registry.get("compare")
+        if entry is None:
+            return {"error": "Compare algorithm not loaded."}
+
+        params = {**entry["defaults"], "scalar": scalar_a, "zone_a": zone_a, "zone_b": zone_b}
+        try:
+            return entry["execute"](state.post_data, params, "")
+        except Exception as e:
+            return {"error": f"Compare failed: {e}"}
 
     def export_data(self, session_id: str, zone: str, scalars: list, format: str = "csv") -> dict:
         state = self.session_mgr.get(session_id)
