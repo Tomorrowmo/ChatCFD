@@ -5,12 +5,18 @@ import ArtifactList from './ArtifactList.vue'
 import JsonCard from './JsonCard.vue'
 import DataTable from './DataTable.vue'
 import VtkViewer from './VtkViewer.vue'
+import MeshBrowser from './MeshBrowser.vue'
 
 const { activeArtifact, state } = useChatStore()
 
 const viewerType = computed(() => {
   const art = activeArtifact.value
   if (!art) return 'none'
+
+  // loadFile summary has zones array → interactive 3D mesh browser
+  if (art.data && Array.isArray(art.data.zones) && art.data.zones.length > 0) {
+    return 'mesh'
+  }
 
   if (art.type === 'numerical') return 'json'
   if (art.type === 'file' && art.file_path) {
@@ -45,6 +51,11 @@ const viewerType = computed(() => {
       <DataTable
         v-else-if="viewerType === 'table'"
         :path="activeArtifact.file_path"
+      />
+
+      <MeshBrowser
+        v-else-if="viewerType === 'mesh'"
+        :data="activeArtifact.data"
       />
 
       <VtkViewer

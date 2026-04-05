@@ -1,41 +1,29 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 
-// VTK.js imports
 import '@kitware/vtk.js/Rendering/Profiles/Geometry'
 import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow'
 import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor'
 import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper'
-import vtkPolyData from '@kitware/vtk.js/Common/DataModel/PolyData'
-import vtkPoints from '@kitware/vtk.js/Common/Core/Points'
-import vtkCellArray from '@kitware/vtk.js/Common/Core/CellArray'
-import vtkDataArray from '@kitware/vtk.js/Common/Core/DataArray'
+import vtkXMLPolyDataReader from '@kitware/vtk.js/IO/XML/XMLPolyDataReader'
 import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction'
-
-import { useApi } from '../composables/useApi.js'
+import vtkScalarBarActor from '@kitware/vtk.js/Rendering/Core/ScalarBarActor'
 
 const props = defineProps({
-  sessionId: { type: String, default: '' },
+  sessionId: { type: String, default: 'default' },
   zone: { type: String, default: '' },
   scalarName: { type: String, default: '' },
   path: { type: String, default: '' },
 })
 
 const containerRef = ref(null)
-const statusMsg = ref('Initializing 3D Viewer...')
-const hasData = ref(false)
-
+const statusMsg = ref('')
 let fullScreenRenderer = null
-
-const api = useApi()
 
 onMounted(() => {
   initViewer()
-  if (props.sessionId && props.zone) {
-    loadData()
-  } else {
-    showPlaceholder()
-  }
+  if (props.zone) loadData()
+  else statusMsg.value = 'Select a zone to view'
 })
 
 onBeforeUnmount(() => {
@@ -48,158 +36,105 @@ onBeforeUnmount(() => {
 watch(
   () => [props.sessionId, props.zone, props.scalarName],
   () => {
-    if (props.sessionId && props.zone) {
-      loadData()
-    }
+    if (props.zone) loadData()
   }
 )
 
 function initViewer() {
   if (!containerRef.value) return
-
   fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
     rootContainer: containerRef.value,
-    containerStyle: {
-      width: '100%',
-      height: '100%',
-    },
+    containerStyle: { width: '100%', height: '100%' },
     background: [0.1, 0.1, 0.13],
   })
 }
 
-function showPlaceholder() {
-  if (!fullScreenRenderer) return
-
-  // Create a simple demo cube to show the viewer is working
-  const renderer = fullScreenRenderer.getRenderer()
-  const renderWindow = fullScreenRenderer.getRenderWindow()
-
-  const polydata = vtkPolyData.newInstance()
-  const points = vtkPoints.newInstance()
-
-  // Simple cube vertices
-  const vertices = new Float32Array([
-    -1, -1, -1,  1, -1, -1,  1,  1, -1,  -1,  1, -1,
-    -1, -1,  1,  1, -1,  1,  1,  1,  1,  -1,  1,  1,
-  ])
-  points.setData(vertices, 3)
-  polydata.setPoints(points)
-
-  // Cube faces as triangles
-  const cells = new Uint32Array([
-    4, 0, 1, 2, 3,
-    4, 4, 5, 6, 7,
-    4, 0, 1, 5, 4,
-    4, 2, 3, 7, 6,
-    4, 0, 3, 7, 4,
-    4, 1, 2, 6, 5,
-  ])
-  const polys = vtkCellArray.newInstance()
-  polys.setData(cells)
-  polydata.setPolys(polys)
-
-  // Add scalar data for coloring
-  const scalars = vtkDataArray.newInstance({
-    name: 'DemoScalar',
-    values: new Float32Array([0, 0.14, 0.29, 0.43, 0.57, 0.71, 0.86, 1.0]),
-    numberOfComponents: 1,
-  })
-  polydata.getPointData().setScalars(scalars)
-
-  const ctf = vtkColorTransferFunction.newInstance()
-  ctf.addRGBPoint(0.0, 0.0, 0.0, 1.0)
-  ctf.addRGBPoint(0.5, 0.0, 1.0, 0.0)
-  ctf.addRGBPoint(1.0, 1.0, 0.0, 0.0)
-
-  const mapper = vtkMapper.newInstance()
-  mapper.setInputData(polydata)
-  mapper.setLookupTable(ctf)
-  mapper.setScalarRange(0, 1)
-
-  const actor = vtkActor.newInstance()
-  actor.setMapper(mapper)
-  actor.getProperty().setEdgeVisibility(true)
-  actor.getProperty().setEdgeColor(0.3, 0.3, 0.35)
-
-  renderer.addActor(actor)
-  renderer.resetCamera()
-  renderWindow.render()
-
-  hasData.value = true
-  statusMsg.value = ''
-}
-
 async function loadData() {
   if (!fullScreenRenderer) return
-  statusMsg.value = 'Loading mesh data...'
+  statusMsg.value = 'Loading 3D mesh...'
 
   try {
-    const meshBuffer = await api.getMesh(props.sessionId, props.zone)
-    const pointsArray = new Float32Array(meshBuffer)
+    const url = `http://localhost:8000/api/surface/${props.sessionId}/${encodeURIComponent(props.zone)}`
+    const resp = await fetch(url)
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const vtpBuffer = await resp.arrayBuffer()
+
+    const reader = vtkXMLPolyDataReader.newInstance()
+    reader.parseAsArrayBuffer(vtpBuffer)
+    const polydata = reader.getOutputData(0)
 
     const renderer = fullScreenRenderer.getRenderer()
     const renderWindow = fullScreenRenderer.getRenderWindow()
 
-    // Clear existing actors
+    // Clear previous actors / scalar bars
     renderer.removeAllViewProps()
-
-    const polydata = vtkPolyData.newInstance()
-    const points = vtkPoints.newInstance()
-    points.setData(pointsArray, 3)
-    polydata.setPoints(points)
-
-    // If scalar name given, fetch and apply
-    if (props.scalarName) {
-      statusMsg.value = 'Loading scalar data...'
-      const scalarBuffer = await api.getScalar(props.sessionId, props.zone, props.scalarName)
-      const scalarArray = new Float32Array(scalarBuffer)
-
-      const scalars = vtkDataArray.newInstance({
-        name: props.scalarName,
-        values: scalarArray,
-        numberOfComponents: 1,
-      })
-      polydata.getPointData().setScalars(scalars)
-    }
-
-    const ctf = vtkColorTransferFunction.newInstance()
-    ctf.addRGBPoint(0.0, 0.0, 0.0, 1.0)
-    ctf.addRGBPoint(0.25, 0.0, 1.0, 1.0)
-    ctf.addRGBPoint(0.5, 0.0, 1.0, 0.0)
-    ctf.addRGBPoint(0.75, 1.0, 1.0, 0.0)
-    ctf.addRGBPoint(1.0, 1.0, 0.0, 0.0)
 
     const mapper = vtkMapper.newInstance()
     mapper.setInputData(polydata)
-    mapper.setLookupTable(ctf)
+
+    // Apply scalar coloring if requested
+    if (props.scalarName) {
+      const pointData = polydata.getPointData()
+      const cellData = polydata.getCellData()
+      let arr = pointData.getArrayByName(props.scalarName)
+      let useCellData = false
+      if (!arr) {
+        arr = cellData.getArrayByName(props.scalarName)
+        useCellData = true
+      }
+      if (arr) {
+        const [lo, hi] = arr.getRange()
+        const ctf = vtkColorTransferFunction.newInstance()
+        const step = (hi - lo) / 4
+        ctf.addRGBPoint(lo, 0.0, 0.0, 1.0)
+        ctf.addRGBPoint(lo + step, 0.0, 1.0, 1.0)
+        ctf.addRGBPoint(lo + 2 * step, 0.0, 1.0, 0.0)
+        ctf.addRGBPoint(lo + 3 * step, 1.0, 1.0, 0.0)
+        ctf.addRGBPoint(hi, 1.0, 0.0, 0.0)
+
+        mapper.setLookupTable(ctf)
+        mapper.setScalarRange(lo, hi)
+        mapper.setScalarVisibility(true)
+        if (useCellData) {
+          mapper.setScalarModeToUseCellData()
+          cellData.setActiveScalars(props.scalarName)
+        } else {
+          mapper.setScalarModeToUsePointData()
+          pointData.setActiveScalars(props.scalarName)
+        }
+        mapper.setColorByArrayName(props.scalarName)
+
+        // Scalar bar
+        const bar = vtkScalarBarActor.newInstance()
+        bar.setScalarsToColors(ctf)
+        bar.setAxisLabel(props.scalarName)
+        renderer.addActor(bar)
+      }
+    }
 
     const actor = vtkActor.newInstance()
     actor.setMapper(mapper)
-
     renderer.addActor(actor)
+
     renderer.resetCamera()
     renderWindow.render()
-
-    hasData.value = true
     statusMsg.value = ''
   } catch (err) {
     statusMsg.value = `Failed to load: ${err.message}`
-    // Fall back to placeholder
-    showPlaceholder()
+    console.error('VtkViewer error:', err)
   }
 }
 </script>
 
 <template>
   <div class="vtk-viewer">
-    <div class="viewer-label">
+    <div class="viewer-label" v-if="path || zone">
       <span>3D Viewer</span>
-      <span v-if="path" class="viewer-path mono">{{ path }}</span>
+      <span v-if="zone" class="viewer-path mono">{{ zone }}{{ scalarName ? ' · ' + scalarName : '' }}</span>
+      <span v-else-if="path" class="viewer-path mono">{{ path }}</span>
     </div>
     <div class="viewer-container" ref="containerRef">
-      <div v-if="statusMsg" class="viewer-overlay">
-        {{ statusMsg }}
-      </div>
+      <div v-if="statusMsg" class="viewer-overlay">{{ statusMsg }}</div>
     </div>
   </div>
 </template>
@@ -211,6 +146,8 @@ async function loadData() {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .viewer-label {
@@ -222,6 +159,7 @@ async function loadData() {
   font-weight: 600;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .viewer-path {
@@ -233,7 +171,8 @@ async function loadData() {
 .viewer-container {
   position: relative;
   width: 100%;
-  height: 400px;
+  flex: 1;
+  min-height: 400px;
 }
 
 .viewer-overlay {
