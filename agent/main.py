@@ -1,5 +1,6 @@
 """ChatCFD Agent Service — WebSocket server + CLI fallback."""
 
+import asyncio
 import json
 import os
 import sys
@@ -57,9 +58,15 @@ async def websocket_endpoint(ws: WebSocket):
             session.messages.append({"role": "user", "content": query})
 
             try:
-                # Stream tokens to frontend
-                for event in agent_loop.stream_run(session, mcp_client, harness, model=MODEL):
+                # Run sync generator in thread executor so WS can flush between tokens
+                loop = asyncio.get_event_loop()
+                gen = agent_loop.stream_run(session, mcp_client, harness, model=MODEL)
+                while True:
+                    event = await loop.run_in_executor(None, lambda: next(gen, None))
+                    if event is None:
+                        break
                     await ws.send_json(event)
+                    await asyncio.sleep(0)  # yield control to flush
             except Exception as e:
                 await ws.send_json({
                     "type": "done",
