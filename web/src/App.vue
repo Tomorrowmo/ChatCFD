@@ -3,28 +3,35 @@ import { computed } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import ArtifactPanel from './components/ArtifactPanel.vue'
+import ArtifactList from './components/ArtifactList.vue'
 import { useChatStore } from './stores/chat.js'
 
-const { state } = useChatStore()
+const { state, activeArtifacts } = useChatStore()
 const panelOpen = computed(() => state.artifactPanelOpen)
+const hasArtifacts = computed(() => activeArtifacts.value.length > 0)
 </script>
 
 <template>
-  <div class="app-layout" :class="{ 'panel-open': panelOpen }">
-    <!-- Sidebar: absolute, reserves 56px rail -->
+  <div class="app-layout" :class="{ 'panel-open': panelOpen || hasArtifacts }">
     <Sidebar />
     <div class="sidebar-rail"></div>
 
-    <!-- Chat: takes remaining space; chat content centered when panel closed -->
     <div class="chat-side">
       <div class="chat-wrapper">
         <ChatPanel />
       </div>
     </div>
 
-    <!-- Artifact: hidden by default; slides in when open -->
-    <div class="artifact-side" v-if="panelOpen">
-      <ArtifactPanel />
+    <!-- Right panel: viewer when open, artifact list when closed (if any artifacts exist) -->
+    <div class="artifact-side" v-if="panelOpen || hasArtifacts">
+      <ArtifactPanel v-if="panelOpen" />
+      <div v-else class="artifact-list-panel">
+        <div class="list-header">
+          <h3>Artifacts</h3>
+          <span class="count">{{ activeArtifacts.length }}</span>
+        </div>
+        <ArtifactList />
+      </div>
     </div>
   </div>
 </template>
@@ -78,11 +85,39 @@ const panelOpen = computed(() => state.artifactPanelOpen)
   min-height: 0;
   display: flex;
   flex-direction: column;
-  animation: slide-in 0.25s ease;
+  border-left: 1px solid var(--border);
+  background: var(--bg-secondary);
 }
 
-@keyframes slide-in {
-  from { opacity: 0; transform: translateX(20px); }
-  to { opacity: 1; transform: translateX(0); }
+.artifact-list-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.list-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.list-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.count {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
 }
 </style>

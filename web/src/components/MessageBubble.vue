@@ -55,6 +55,23 @@ function formatArgsHint(tool, args) {
 
 // Use parts if available, otherwise fall back to plain content
 const hasParts = computed(() => props.parts && props.parts.length > 0)
+
+// Convert file paths in text to clickable links
+function linkifyPaths(text) {
+  if (!text) return ''
+  // Escape HTML first
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  // Match file paths: D:/... or /path/to/file with common extensions
+  return escaped.replace(
+    /([A-Z]:[\\/][\w.\-\\/]+\.(?:csv|png|jpg|vtp|vtm|vts|cgns|plt|dat|case))/gi,
+    (match) => {
+      const safePath = match.split('/').map(s => encodeURIComponent(s)).join('/')
+      const url = `http://localhost:8000/api/file/${safePath}`
+      const filename = match.split(/[\\/]/).pop()
+      return `<a href="${url}" target="_blank" class="file-link" title="${match}">${match}</a>`
+    }
+  )
+}
 </script>
 
 <template>
@@ -62,7 +79,7 @@ const hasParts = computed(() => props.parts && props.parts.length > 0)
     <div class="bubble" :class="role">
       <template v-if="hasParts">
         <template v-for="(part, i) in parts" :key="i">
-          <div v-if="part.type === 'text'" class="bubble-text">{{ part.content }}</div>
+          <div v-if="part.type === 'text'" class="bubble-text" v-html="linkifyPaths(part.content)"></div>
           <div v-else-if="part.type === 'tool'" class="tool-part" :class="part.status">
             <div class="tool-header">
               <span class="tool-icon">
@@ -79,7 +96,7 @@ const hasParts = computed(() => props.parts && props.parts.length > 0)
           </div>
         </template>
       </template>
-      <div v-else class="bubble-text">{{ content }}</div>
+      <div v-else class="bubble-text" v-html="linkifyPaths(content)"></div>
 
       <div v-if="artifacts.length" class="artifact-links">
         <button
@@ -228,6 +245,18 @@ const hasParts = computed(() => props.parts && props.parts.length > 0)
 
 .artifact-link:hover {
   background: rgba(255, 255, 255, 0.15);
+}
+
+.bubble-text :deep(.file-link) {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(100, 149, 237, 0.4);
+  word-break: break-all;
+  cursor: pointer;
+}
+
+.bubble-text :deep(.file-link:hover) {
+  text-decoration-color: var(--accent);
 }
 
 .artifact-icon {
