@@ -1,22 +1,22 @@
 :root {
-  /* Claude-inspired warm dark theme */
-  --bg-primary: #2b2a27;
-  --bg-secondary: #302f2b;
-  --bg-tertiary: #3a3935;
-  --bg-input: #3a3935;
-  --bg-hover: #45443f;
-  --bg-user-msg: #da7756;
-  --bg-ai-msg: #363530;
-  --text-primary: #ececea;
-  --text-secondary: #a8a8a2;
-  --text-muted: #78776f;
-  --border: #4a4940;
+  /* Claude light theme — warm cream/beige */
+  --bg-primary: #faf9f6;
+  --bg-secondary: #f3f2ee;
+  --bg-tertiary: #eae9e5;
+  --bg-input: #ffffff;
+  --bg-hover: #e5e4e0;
+  --bg-user-msg: #ee7b56;
+  --bg-ai-msg: #f3f2ee;
+  --text-primary: #1a1915;
+  --text-secondary: #6b6a65;
+  --text-muted: #9b9a95;
+  --border: #dddcd8;
   --accent: #da7756;
   --accent-hover: #c4654a;
-  --success: #5bb98c;
-  --warning: #e0a84e;
-  --error: #dc6258;
-  --shadow: rgba(0, 0, 0, 0.25) 0 4px 12px;
+  --success: #2e8b57;
+  --warning: #d4910a;
+  --error: #d1453b;
+  --shadow: rgba(0, 0, 0, 0.08) 0 4px 12px;
 
   --sans: 'Söhne', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'Söhne Mono', ui-monospace, Consolas, 'Courier New', monospace;
@@ -52,11 +52,11 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: #c5c4c0;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: #a5a4a0;
 }
 
 /* Monospace for data values */

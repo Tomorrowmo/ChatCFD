@@ -150,7 +150,7 @@ function linkifyPaths(text) {
   margin: 8px 0;
   padding: 8px 10px;
   border-left: 2px solid var(--accent);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.04);
   border-radius: 4px;
   font-size: 12px;
 }
@@ -177,7 +177,7 @@ function linkifyPaths(text) {
 .spinner {
   width: 11px;
   height: 11px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(0, 0, 0, 0.15);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -224,7 +224,7 @@ function linkifyPaths(text) {
   gap: 6px;
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .artifact-link {
@@ -233,14 +233,14 @@ function linkifyPaths(text) {
   gap: 4px;
   padding: 4px 10px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.06);
   color: var(--accent);
   font-size: 12px;
   transition: background 0.15s;
 }
 
 .artifact-link:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .bubble-text :deep(.file-link) {
