@@ -186,6 +186,14 @@ async function loadData() {
 
     renderer.resetCamera()
     renderWindow.render()
+    // Re-fit camera after container layout stabilizes (panel animation)
+    setTimeout(() => {
+      if (fullScreenRenderer) {
+        fullScreenRenderer.resize()
+        renderer.resetCamera()
+        renderWindow.render()
+      }
+    }, 300)
     statusMsg.value = ''
   } catch (err) {
     statusMsg.value = `Failed to load: ${err.message}`
