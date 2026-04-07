@@ -8,6 +8,8 @@ import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper'
 import vtkXMLPolyDataReader from '@kitware/vtk.js/IO/XML/XMLPolyDataReader'
 import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction'
 import vtkScalarBarActor from '@kitware/vtk.js/Rendering/Core/ScalarBarActor'
+import vtkAxesActor from '@kitware/vtk.js/Rendering/Core/AxesActor'
+import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget'
 
 const props = defineProps({
   path: { type: String, required: true },
@@ -23,6 +25,7 @@ let loadedPolydata = null
 
 onMounted(() => {
   initViewer()
+  addOrientationAxes()
   loadVtp()
 })
 
@@ -43,6 +46,24 @@ function initViewer() {
     containerStyle: { width: '100%', height: '100%' },
     background: [0.1, 0.1, 0.13],
   })
+}
+
+function addOrientationAxes() {
+  if (!fullScreenRenderer) return
+  try {
+    const axes = vtkAxesActor.newInstance()
+    const widget = vtkOrientationMarkerWidget.newInstance({
+      actor: axes,
+      interactor: fullScreenRenderer.getRenderWindow().getInteractor(),
+    })
+    widget.setEnabled(true)
+    widget.setViewportCorner(vtkOrientationMarkerWidget.Corners.BOTTOM_LEFT)
+    widget.setViewportSize(0.15)
+    widget.setMinPixelSize(80)
+    widget.setMaxPixelSize(200)
+  } catch (err) {
+    console.warn('[VtpBrowser] Could not add orientation axes:', err.message)
+  }
 }
 
 async function loadVtp() {

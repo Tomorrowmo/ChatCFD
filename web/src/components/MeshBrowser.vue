@@ -64,6 +64,7 @@ watch(selectedZone, () => {
       </label>
     </div>
     <VtkViewer
+      :key="`${sessionId}-${selectedZone}-${selectedScalar}`"
       :sessionId="sessionId"
       :zone="selectedZone"
       :scalarName="selectedScalar"
