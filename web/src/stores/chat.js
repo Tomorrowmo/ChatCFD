@@ -24,7 +24,7 @@ const state = reactive({
   conversations: {}, // id -> conversation
   activeConversationId: null,
   artifactPanelOpen: false, // global: is the right panel showing an artifact?
-  artifactListVisible: true, // history list visible (when viewer closed)
+  artifactListVisible: false, // starts hidden; set true when artifacts exist
 })
 
 // --- Persistence ---
