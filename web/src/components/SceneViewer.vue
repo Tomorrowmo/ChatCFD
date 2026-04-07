@@ -44,7 +44,7 @@ function initViewer() {
   fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
     rootContainer: containerRef.value,
     containerStyle: { width: '100%', height: '100%' },
-    background: [0.1, 0.1, 0.13],
+    background: [0.95, 0.95, 0.93],
   })
   addOrientationAxes()
 }
