@@ -1,9 +1,23 @@
-"""HTTP endpoint: extract zone surface as VTP binary for VTK.js frontend."""
+"""HTTP endpoints: zone info + surface extraction for VTK.js frontend."""
+import json
 import vtk
 from fastapi import Response
 
 
 def setup(app, engine):
+    @app.get("/api/zones/{session_id}")
+    async def get_zones(session_id: str):
+        """Return live zone/scalar info from current session (reflects post-calculation changes)."""
+        state = engine.session_mgr.get(session_id)
+        if state is None or state.post_data is None:
+            return Response(content=b"[]", media_type="application/json", status_code=404)
+        summary = state.post_data.get_summary()
+        return Response(
+            content=json.dumps(summary, ensure_ascii=False).encode(),
+            media_type="application/json",
+            headers={"Access-Control-Allow-Origin": "*"},
+        )
+
     @app.get("/api/surface/{session_id}/{zone}")
     async def get_surface(session_id: str, zone: str):
         state = engine.session_mgr.get(session_id)

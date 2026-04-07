@@ -1,45 +1,65 @@
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
 import VtkViewer from './VtkViewer.vue'
 import { useChatStore } from '../stores/chat.js'
 
 const props = defineProps({
-  data: Object, // loadFile summary: {zones: [{name, scalars: [{raw_name, display_name, ...}]}]}
+  data: Object, // loadFile summary (initial data, refreshed from API)
 })
 
 const { activeConversation } = useChatStore()
 const sessionId = computed(() => activeConversation.value?.id || 'default')
 const selectedZone = ref('')
 const selectedScalar = ref('')
+const liveZones = ref([])
+const loading = ref(false)
 
-const zones = computed(() => props.data?.zones || [])
+// Use live data if available, fall back to artifact snapshot
+const zones = computed(() => liveZones.value.length ? liveZones.value : (props.data?.zones || []))
 const currentZoneScalars = computed(() => {
   const z = zones.value.find((x) => x.name === selectedZone.value)
   return z?.scalars || []
 })
 
-// Initialize with first zone + first scalar when data arrives or changes
-watch(
-  () => props.data,
-  (d) => {
-    if (d?.zones?.length) {
-      if (!selectedZone.value || !d.zones.find((z) => z.name === selectedZone.value)) {
-        selectedZone.value = d.zones[0].name
-        const firstScalar = d.zones[0].scalars?.[0]
-        selectedScalar.value = firstScalar?.raw_name || ''
+// Fetch latest zone/scalar info from backend (picks up post-calculation changes)
+async function refreshZones() {
+  try {
+    loading.value = true
+    const resp = await fetch(`http://localhost:8000/api/zones/${sessionId.value}`)
+    if (resp.ok) {
+      const data = await resp.json()
+      if (data.zones) {
+        liveZones.value = data.zones
       }
     }
-  },
-  { immediate: true }
-)
+  } catch (e) {
+    console.warn('[MeshBrowser] Failed to refresh zones:', e.message)
+  } finally {
+    loading.value = false
+  }
+}
 
-// When zone changes, reset scalar to first available in that zone
+function autoSelect() {
+  const z = zones.value
+  if (z.length && (!selectedZone.value || !z.find(x => x.name === selectedZone.value))) {
+    selectedZone.value = z[0].name
+    const firstScalar = z[0].scalars?.[0]
+    selectedScalar.value = firstScalar?.raw_name || ''
+  }
+}
+
+watch(() => props.data, () => { autoSelect() }, { immediate: true })
+watch(liveZones, () => { autoSelect() })
+
 watch(selectedZone, () => {
   const scalars = currentZoneScalars.value
   if (scalars.length && !scalars.find((s) => s.raw_name === selectedScalar.value)) {
     selectedScalar.value = scalars[0].raw_name
   }
 })
+
+onMounted(() => { refreshZones() })
+watch(sessionId, () => { refreshZones() })
 </script>
 
 <template>
@@ -49,7 +69,7 @@ watch(selectedZone, () => {
         Zone:
         <select v-model="selectedZone">
           <option v-for="z in zones" :key="z.name" :value="z.name">
-            {{ z.name }} ({{ z.point_count }} pts)
+            {{ z.name }} ({{ z.point_count || z.n_points || '?' }} pts)
           </option>
         </select>
       </label>
@@ -62,6 +82,9 @@ watch(selectedZone, () => {
           </option>
         </select>
       </label>
+      <button class="refresh-btn" @click="refreshZones" :disabled="loading" title="刷新标量列表">
+        {{ loading ? '...' : '↻' }}
+      </button>
     </div>
     <VtkViewer
       :key="`${sessionId}-${selectedZone}-${selectedScalar}`"
@@ -89,6 +112,7 @@ watch(selectedZone, () => {
   border-radius: 6px;
   flex-shrink: 0;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .controls label {
@@ -108,4 +132,17 @@ watch(selectedZone, () => {
   font-size: 12px;
   max-width: 260px;
 }
+
+.refresh-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.refresh-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>
