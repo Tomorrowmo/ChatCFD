@@ -94,16 +94,11 @@ const artifactCount = computed(() => activeArtifacts.value.length)
 
 .chat-wrapper {
   width: 100%;
-  max-width: 900px;
+  max-width: 800px;
   height: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-.app-layout.panel-open .chat-wrapper,
-.app-layout.list-visible .chat-wrapper {
-  max-width: none;
 }
 
 .artifact-side {
