@@ -1,24 +1,17 @@
 <script setup>
-import { computed, watch } from 'vue'
+import { computed } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import JsonCard from './JsonCard.vue'
 import DataTable from './DataTable.vue'
-import SceneViewer from './SceneViewer.vue'
+import MeshBrowser from './MeshBrowser.vue'
+import VtpBrowser from './VtpBrowser.vue'
 
-const {
-  activeArtifact,
-  activeConversation,
-  activeSceneLayers,
-  closeArtifactPanel,
-  addSceneLayer,
-  clearSceneLayers,
-} = useChatStore()
+const { activeArtifact, closeArtifactPanel } = useChatStore()
 
 const viewerType = computed(() => {
   const art = activeArtifact.value
   if (!art) return 'none'
 
-  // loadFile summary has zones array -> interactive 3D mesh browser
   if (art.data && Array.isArray(art.data.zones) && art.data.zones.length > 0) {
     return 'mesh'
   }
@@ -35,80 +28,13 @@ const viewerType = computed(() => {
 
 const viewerTypeLabel = computed(() => {
   const t = viewerType.value
-  if (t === 'mesh') return '3D Scene'
-  if (t === 'vtk') return '3D Scene'
+  if (t === 'mesh') return '3D Mesh'
+  if (t === 'vtk') return '3D Viewer'
   if (t === 'image') return 'Image'
   if (t === 'table') return 'Data Table'
   if (t === 'json') return 'Result'
   return ''
 })
-
-const meshData = computed(() => {
-  const art = activeArtifact.value
-  if (art && art.data && Array.isArray(art.data.zones)) return art.data
-  return null
-})
-
-// Use a scene-based viewer for mesh and vtk types
-const useSceneViewer = computed(() =>
-  viewerType.value === 'mesh' || viewerType.value === 'vtk'
-)
-
-// Track which artifacts we have already auto-added as layers to avoid duplicates
-const autoAddedArtifacts = new Set()
-
-// When a .vtp artifact is selected, auto-add it as a scene layer
-watch(
-  activeArtifact,
-  (art) => {
-    if (!art) return
-    const artKey = `${art.id}-${art.file_path || ''}`
-    if (autoAddedArtifacts.has(artKey)) return
-
-    if (art.type === 'file' && art.file_path && art.file_path.endsWith('.vtp')) {
-      // Check if this file is already a layer
-      const layers = activeSceneLayers.value
-      const alreadyExists = layers.some(
-        l => l.type === 'file' && l.source.filePath === art.file_path
-      )
-      if (!alreadyExists) {
-        // Extract a nice name from the file path
-        const parts = art.file_path.replace(/\\/g, '/').split('/')
-        const fileName = parts[parts.length - 1].replace('.vtp', '')
-        addSceneLayer({
-          name: art.title || fileName,
-          type: 'file',
-          source: { filePath: art.file_path },
-        })
-      }
-      autoAddedArtifacts.add(artKey)
-    }
-
-    // When a new loadFile artifact is selected: clear old layers + add first zone
-    if (art.data && Array.isArray(art.data.zones) && art.data.zones.length > 0) {
-      if (autoAddedArtifacts.has(artKey)) return
-
-      // New data source → clear all old layers (old zones no longer valid)
-      clearSceneLayers()
-
-      const firstZone = art.data.zones[0]
-      const firstScalar = firstZone.scalars?.[0]
-      const scalarName = firstScalar?.raw_name || ''
-      const displayScalar = scalarName || 'geometry'
-      addSceneLayer({
-        name: `${firstZone.name} (${displayScalar})`,
-        type: 'zone',
-        source: {
-          sessionId: activeConversation.value?.id || 'default',
-          zone: firstZone.name,
-          scalarName,
-        },
-      })
-      autoAddedArtifacts.add(artKey)
-    }
-  },
-  { immediate: true }
-)
 </script>
 
 <template>
@@ -142,9 +68,14 @@ watch(
         :path="activeArtifact.file_path"
       />
 
-      <SceneViewer
-        v-else-if="useSceneViewer"
-        :meshData="meshData"
+      <MeshBrowser
+        v-else-if="viewerType === 'mesh'"
+        :data="activeArtifact.data"
+      />
+
+      <VtpBrowser
+        v-else-if="viewerType === 'vtk'"
+        :path="activeArtifact.file_path"
       />
 
       <img
