@@ -11,6 +11,7 @@ const {
   activeSceneLayers,
   closeArtifactPanel,
   addSceneLayer,
+  clearSceneLayers,
 } = useChatStore()
 
 const viewerType = computed(() => {
@@ -83,25 +84,26 @@ watch(
       autoAddedArtifacts.add(artKey)
     }
 
-    // Auto-add first zone when mesh artifact is selected and no layers exist
+    // When a new loadFile artifact is selected: clear old layers + add first zone
     if (art.data && Array.isArray(art.data.zones) && art.data.zones.length > 0) {
       if (autoAddedArtifacts.has(artKey)) return
-      const layers = activeSceneLayers.value
-      if (layers.length === 0) {
-        const firstZone = art.data.zones[0]
-        const firstScalar = firstZone.scalars?.[0]
-        const scalarName = firstScalar?.raw_name || ''
-        const displayScalar = scalarName || 'geometry'
-        addSceneLayer({
-          name: `${firstZone.name} (${displayScalar})`,
-          type: 'zone',
-          source: {
-            sessionId: activeConversation.value?.id || 'default',
-            zone: firstZone.name,
-            scalarName,
-          },
-        })
-      }
+
+      // New data source → clear all old layers (old zones no longer valid)
+      clearSceneLayers()
+
+      const firstZone = art.data.zones[0]
+      const firstScalar = firstZone.scalars?.[0]
+      const scalarName = firstScalar?.raw_name || ''
+      const displayScalar = scalarName || 'geometry'
+      addSceneLayer({
+        name: `${firstZone.name} (${displayScalar})`,
+        type: 'zone',
+        source: {
+          sessionId: activeConversation.value?.id || 'default',
+          zone: firstZone.name,
+          scalarName,
+        },
+      })
       autoAddedArtifacts.add(artKey)
     }
   },
