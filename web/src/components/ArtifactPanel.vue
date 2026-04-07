@@ -21,7 +21,8 @@ const viewerType = computed(() => {
   if (art.type === 'numerical') return 'json'
   if (art.type === 'file' && art.file_path) {
     if (art.file_path.endsWith('.csv')) return 'table'
-    if (art.file_path.endsWith('.vtm') || art.file_path.endsWith('.vtp')) return 'vtk'
+    if (art.file_path.endsWith('.vtp')) return 'vtk'
+    if (art.file_path.endsWith('.vtm')) return 'json'  // VTM = multi-block, show as result card; view in MeshBrowser
     if (art.file_path.endsWith('.png') || art.file_path.endsWith('.jpg')) return 'image'
   }
   return 'json'
