@@ -80,7 +80,7 @@ const viewerTypeLabel = computed(() => {
 
       <img
         v-else-if="viewerType === 'image'"
-        :src="`http://localhost:8000/api/file/${activeArtifact.file_path}`"
+        :src="`http://localhost:8000/api/file/${activeArtifact.file_path.split('/').map(s => encodeURIComponent(s)).join('/')}`"
         class="artifact-image"
         :alt="activeArtifact.title"
       />

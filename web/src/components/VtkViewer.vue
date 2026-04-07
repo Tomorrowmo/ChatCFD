@@ -160,7 +160,9 @@ async function loadFromFile() {
   statusMsg.value = 'Loading VTP file...'
 
   try {
-    const url = `http://localhost:8000/api/file/${props.path}`
+    // Encode path but keep slashes intact (browser treats D: as protocol otherwise)
+    const safePath = props.path.split('/').map(s => encodeURIComponent(s)).join('/')
+    const url = `http://localhost:8000/api/file/${safePath}`
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const vtpBuffer = await resp.arrayBuffer()
