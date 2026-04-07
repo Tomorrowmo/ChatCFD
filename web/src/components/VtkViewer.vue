@@ -22,7 +22,8 @@ let fullScreenRenderer = null
 
 onMounted(() => {
   initViewer()
-  if (props.zone) loadData()
+  if (props.path) loadFromFile()
+  else if (props.zone) loadData()
   else statusMsg.value = 'Select a zone to view'
 })
 
@@ -37,6 +38,13 @@ watch(
   () => [props.sessionId, props.zone, props.scalarName],
   () => {
     if (props.zone) loadData()
+  }
+)
+
+watch(
+  () => props.path,
+  (newPath) => {
+    if (newPath) loadFromFile()
   }
 )
 
@@ -144,6 +152,91 @@ async function loadData() {
   } catch (err) {
     statusMsg.value = `Failed to load: ${err.message}`
     console.error('VtkViewer error:', err)
+  }
+}
+
+async function loadFromFile() {
+  if (!fullScreenRenderer || !props.path) return
+  statusMsg.value = 'Loading VTP file...'
+
+  try {
+    const url = `http://localhost:8000/api/file/${props.path}`
+    const resp = await fetch(url)
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const vtpBuffer = await resp.arrayBuffer()
+
+    const reader = vtkXMLPolyDataReader.newInstance()
+    reader.parseAsArrayBuffer(vtpBuffer)
+    const polydata = reader.getOutputData(0)
+
+    const renderer = fullScreenRenderer.getRenderer()
+    const renderWindow = fullScreenRenderer.getRenderWindow()
+    renderer.removeAllViewProps()
+
+    const mapper = vtkMapper.newInstance()
+    mapper.setInputData(polydata)
+
+    // Auto-color by first scalar array if available
+    const pd = polydata.getPointData()
+    const cd = polydata.getCellData()
+    let arr = null
+    let arrName = ''
+    let useCellData = false
+
+    // Try point data first, then cell data
+    if (pd.getNumberOfArrays() > 0) {
+      arr = pd.getArrayByIndex(0)
+      arrName = arr.getName()
+    } else if (cd.getNumberOfArrays() > 0) {
+      arr = cd.getArrayByIndex(0)
+      arrName = arr.getName()
+      useCellData = true
+    }
+
+    if (arr && arr.getNumberOfComponents() === 1) {
+      const [lo, hi] = arr.getRange()
+      console.log(`[VtkViewer] File mode: coloring by '${arrName}', range=[${lo}, ${hi}]`)
+
+      const ctf = vtkColorTransferFunction.newInstance()
+      const step = (hi - lo) / 4
+      ctf.addRGBPoint(lo, 0.0, 0.0, 1.0)
+      ctf.addRGBPoint(lo + step, 0.0, 1.0, 1.0)
+      ctf.addRGBPoint(lo + 2 * step, 0.0, 1.0, 0.0)
+      ctf.addRGBPoint(lo + 3 * step, 1.0, 1.0, 0.0)
+      ctf.addRGBPoint(hi, 1.0, 0.0, 0.0)
+
+      if (useCellData) {
+        cd.setActiveScalars(arrName)
+        mapper.setScalarModeToUseCellData()
+      } else {
+        pd.setActiveScalars(arrName)
+        mapper.setScalarModeToUsePointData()
+      }
+      mapper.setLookupTable(ctf)
+      mapper.setUseLookupTableScalarRange(false)
+      mapper.setScalarRange(lo, hi)
+      mapper.setScalarVisibility(true)
+      mapper.setColorByArrayName(arrName)
+
+      const bar = vtkScalarBarActor.newInstance()
+      bar.setScalarsToColors(ctf)
+      bar.setAxisLabel(arrName)
+      renderer.addActor(bar)
+    }
+
+    const actor = vtkActor.newInstance()
+    actor.setMapper(mapper)
+    if (!arr) {
+      actor.getProperty().setColor(0.5, 0.7, 0.9)
+    }
+    renderer.addActor(actor)
+
+    renderer.resetCamera()
+    renderWindow.render()
+    statusMsg.value = ''
+  } catch (err) {
+    statusMsg.value = `Failed to load file: ${err.message}`
+    console.error('VtkViewer loadFromFile error:', err)
   }
 }
 </script>
