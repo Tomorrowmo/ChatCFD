@@ -1977,12 +1977,30 @@ git push origin master
 | 额外 | Sidebar 会话管理（Claude 风格） | ✅ |
 | 额外 | 多会话隔离（conversation_id 全链路） | ✅ |
 | 额外 | Settings 面板（运行时切换模型） | ✅ |
-| 额外 | 交互式 3D 流场（VTP + VTK.js） | ⚠️ 加载OK，云图着色待修 |
+| 额外 | 交互式 3D 流场（VTP + VTK.js） | ✅ MeshBrowser + VtpBrowser |
+| 额外 | streamline 流线（VTK 标准 vtkStreamTracer） | ✅ |
+| 额外 | contour 等值面（VTK 标准 vtkContourFilter） | ✅ |
+| 额外 | VTP 文件 3D 查看（切片/流线/等值面结果） | ✅ VtpBrowser + scalar picker |
+| 额外 | 坐标系指示器（AxesActor + OrientationMarkerWidget） | ✅ |
+| 额外 | MeshBrowser 动态刷新标量（/api/zones）| ✅ |
+| 额外 | Artifact 列表（关闭查看器后显示历史）| ✅ |
+| 额外 | 聊天文件路径可点击 | ✅ |
+| 额外 | DataTable 全高度 | ✅ |
 
-### 待修复
+### 已修复的 bug
 
-- VTK.js 云图着色（scalar coloring）不生效 — 需调试 VTK.js mapper API
-- 已修但待提交：Sidebar 折叠/展开、Artifact 面板 Claude 风格、自动滚动、输入框布局
+- VTK.js 云图着色 — 已修（scalar coloring + LUT）
+- Sidebar 折叠/展开 — 已修（Claude 风格，hover 展开）
+- Artifact 面板 Claude 风格 — 已修（默认隐藏，点击弹出，关闭显示列表）
+- 自动滚动 — 已修（只在底部时跟随）
+- 输入框被挤 — 已修（chat-wrapper + min-height:0）
+- ReadFiles 参数错误 — 已修（传 list 不是 string）
+- CORS — 已修（post_service 全局中间件）
+- 文件路径 URL 编码 — 已修（D: 冒号问题）
+- Settings 模型名前缀 — 已修（openai/ 不是 qwen/）
+- .vtm 文件路由 — 已修（不用 VtpBrowser 加载）
+- MeshBrowser 不自动渲染 — 已修（VtkViewer key 强制 remount）
+- Archive MD5 慢 — 已修（改为 size+mtime fingerprint）
 
 ---
 

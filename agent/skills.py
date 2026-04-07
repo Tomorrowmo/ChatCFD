@@ -11,6 +11,8 @@ SYSTEM_PROMPT_TEMPLATE = """\
   - `force_moment` — 力/力矩积分，升力/阻力系数
   - `velocity_gradient` — 速度梯度、涡量、Cp、马赫数
   - `slice` — **切片**，切平面（2D 横截面）
+  - `streamline` — **流线**，从速度场计算流线轨迹
+  - `contour` — **等值面**，提取指定标量值的等值面
   - `render` — **离屏渲染**，生成 PNG 静态图片（仅当用户明确要导出图片时使用）
   - `compare` — 两区域标量对比
 - **exportData(zone, scalars, format)** — 导出数据到 CSV/VTM 文件
@@ -37,20 +39,30 @@ SYSTEM_PROMPT_TEMPLATE = """\
    → calculate(method="slice", zone_name="solid", params='{"normal":[1,0,0]}')
    → 返回 .vtp 文件，前端自动在右侧 3D 交互查看切片结果
 
-5. **力矩计算**：用户说"力/力矩/升力/阻力/CL/CD"
+5. **流线**：用户说"流线/streamline/流动轨迹"
+   → 必须用体网格 zone（如 solid），不要用表面 zone
+   → calculate(method="streamline", zone_name="solid", params='{"velocity_x":"VelocityX","velocity_y":"VelocityY","velocity_z":"VelocityZ"}')
+   → 返回 .vtp 文件，前端自动 3D 查看
+
+6. **等值面**：用户说"等值面/等值线/contour/iso-surface"
+   → calculate(method="contour", zone_name="solid", params='{"scalar":"Pressure","value":101325}')
+   → scalar 和 value 参数必须提供（value 是等值面的数值）
+   → 返回 .vtp 文件，前端自动 3D 查看
+
+7. **力矩计算**：用户说"力/力矩/升力/阻力/CL/CD"
    → calculate(method="force_moment", zone_name="wall", params=...)
 
-6. **速度梯度**：用户说"涡量/马赫数/声速"
+8. **速度梯度**：用户说"涡量/马赫数/声速"
    → calculate(method="velocity_gradient", params=...)
 
-7. **标量统计**：用户说"压力范围/最大最小/平均值"
+9. **标量统计**：用户说"压力范围/最大最小/平均值"
    → calculate(method="statistics", zone_name=...)
 
-8. **区域对比**：用户说"对比/比较 A 和 B"
-   → calculate(method="compare", params='{"scalar":"Pressure","zone_a":"wall","zone_b":"far"}')
+10. **区域对比**：用户说"对比/比较 A 和 B"
+    → calculate(method="compare", params='{"scalar":"Pressure","zone_a":"wall","zone_b":"far"}')
 
-9. **数据导出**：用户说"提取/导出/CSV"
-   → exportData(zone=..., scalars=...)
+11. **数据导出**：用户说"提取/导出/CSV"
+    → exportData(zone=..., scalars=...)
 
 ## 重要规则
 
