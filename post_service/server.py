@@ -4,6 +4,7 @@ import os
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from mcp.server.fastmcp import FastMCP
 
 from post_service.engine import PostEngine
@@ -24,6 +25,12 @@ register_mcp_tools(mcp, engine)
 
 # FastAPI app
 app = FastAPI(title="ChatCFD")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Mount MCP SSE transport at /mcp
 sse_app = mcp.sse_app()
