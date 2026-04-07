@@ -96,7 +96,7 @@ watch(sessionId, () => { refreshZones() })
       </button>
     </div>
     <VtkViewer
-      :key="`${sessionId}-${selectedZone}-${selectedScalar}`"
+      :key="`${sessionId}-${selectedZone}-${selectedScalar}-${displayMode}`"
       :sessionId="sessionId"
       :zone="selectedZone"
       :scalarName="selectedScalar"
