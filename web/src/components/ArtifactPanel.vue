@@ -1,19 +1,23 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import JsonCard from './JsonCard.vue'
 import DataTable from './DataTable.vue'
-import VtkViewer from './VtkViewer.vue'
-import VtpBrowser from './VtpBrowser.vue'
-import MeshBrowser from './MeshBrowser.vue'
+import SceneViewer from './SceneViewer.vue'
 
-const { activeArtifact, closeArtifactPanel } = useChatStore()
+const {
+  activeArtifact,
+  activeConversation,
+  activeSceneLayers,
+  closeArtifactPanel,
+  addSceneLayer,
+} = useChatStore()
 
 const viewerType = computed(() => {
   const art = activeArtifact.value
   if (!art) return 'none'
 
-  // loadFile summary has zones array → interactive 3D mesh browser
+  // loadFile summary has zones array -> interactive 3D mesh browser
   if (art.data && Array.isArray(art.data.zones) && art.data.zones.length > 0) {
     return 'mesh'
   }
@@ -22,7 +26,7 @@ const viewerType = computed(() => {
   if (art.type === 'file' && art.file_path) {
     if (art.file_path.endsWith('.csv')) return 'table'
     if (art.file_path.endsWith('.vtp')) return 'vtk'
-    if (art.file_path.endsWith('.vtm')) return 'json'  // VTM = multi-block, show as result card; view in MeshBrowser
+    if (art.file_path.endsWith('.vtm')) return 'json'
     if (art.file_path.endsWith('.png') || art.file_path.endsWith('.jpg')) return 'image'
   }
   return 'json'
@@ -30,13 +34,79 @@ const viewerType = computed(() => {
 
 const viewerTypeLabel = computed(() => {
   const t = viewerType.value
-  if (t === 'mesh') return '3D Mesh'
-  if (t === 'vtk') return '3D Viewer'
+  if (t === 'mesh') return '3D Scene'
+  if (t === 'vtk') return '3D Scene'
   if (t === 'image') return 'Image'
   if (t === 'table') return 'Data Table'
   if (t === 'json') return 'Result'
   return ''
 })
+
+const meshData = computed(() => {
+  const art = activeArtifact.value
+  if (art && art.data && Array.isArray(art.data.zones)) return art.data
+  return null
+})
+
+// Use a scene-based viewer for mesh and vtk types
+const useSceneViewer = computed(() =>
+  viewerType.value === 'mesh' || viewerType.value === 'vtk'
+)
+
+// Track which artifacts we have already auto-added as layers to avoid duplicates
+const autoAddedArtifacts = new Set()
+
+// When a .vtp artifact is selected, auto-add it as a scene layer
+watch(
+  activeArtifact,
+  (art) => {
+    if (!art) return
+    const artKey = `${art.id}-${art.file_path || ''}`
+    if (autoAddedArtifacts.has(artKey)) return
+
+    if (art.type === 'file' && art.file_path && art.file_path.endsWith('.vtp')) {
+      // Check if this file is already a layer
+      const layers = activeSceneLayers.value
+      const alreadyExists = layers.some(
+        l => l.type === 'file' && l.source.filePath === art.file_path
+      )
+      if (!alreadyExists) {
+        // Extract a nice name from the file path
+        const parts = art.file_path.replace(/\\/g, '/').split('/')
+        const fileName = parts[parts.length - 1].replace('.vtp', '')
+        addSceneLayer({
+          name: art.title || fileName,
+          type: 'file',
+          source: { filePath: art.file_path },
+        })
+      }
+      autoAddedArtifacts.add(artKey)
+    }
+
+    // Auto-add first zone when mesh artifact is selected and no layers exist
+    if (art.data && Array.isArray(art.data.zones) && art.data.zones.length > 0) {
+      if (autoAddedArtifacts.has(artKey)) return
+      const layers = activeSceneLayers.value
+      if (layers.length === 0) {
+        const firstZone = art.data.zones[0]
+        const firstScalar = firstZone.scalars?.[0]
+        const scalarName = firstScalar?.raw_name || ''
+        const displayScalar = scalarName || 'geometry'
+        addSceneLayer({
+          name: `${firstZone.name} (${displayScalar})`,
+          type: 'zone',
+          source: {
+            sessionId: activeConversation.value?.id || 'default',
+            zone: firstZone.name,
+            scalarName,
+          },
+        })
+      }
+      autoAddedArtifacts.add(artKey)
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -46,7 +116,7 @@ const viewerTypeLabel = computed(() => {
         <span class="header-type">{{ viewerTypeLabel }}</span>
         <h2 class="header-title truncate" v-if="activeArtifact">{{ activeArtifact.title }}</h2>
       </div>
-      <button class="close-btn" @click="closeArtifactPanel" title="关闭">
+      <button class="close-btn" @click="closeArtifactPanel" title="Close">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5">
           <path d="M6 6 L18 18 M18 6 L6 18" stroke-linecap="round"/>
         </svg>
@@ -70,14 +140,9 @@ const viewerTypeLabel = computed(() => {
         :path="activeArtifact.file_path"
       />
 
-      <MeshBrowser
-        v-else-if="viewerType === 'mesh'"
-        :data="activeArtifact.data"
-      />
-
-      <VtpBrowser
-        v-else-if="viewerType === 'vtk'"
-        :path="activeArtifact.file_path"
+      <SceneViewer
+        v-else-if="useSceneViewer"
+        :meshData="meshData"
       />
 
       <img

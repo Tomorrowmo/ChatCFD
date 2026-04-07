@@ -14,6 +14,7 @@ function newConversation(title = '新对话') {
     messages: [],
     artifacts: [],
     activeArtifactIndex: -1,
+    sceneLayers: [],
     created_at: now,
     updated_at: now,
   }
@@ -308,11 +309,64 @@ export function useChatStore() {
     state.artifactListVisible = true
   }
 
+  // --- Scene Layers ---
+  let nextLayerId = 1
+  const activeSceneLayers = computed(() => getActiveConversation()?.sceneLayers || [])
+
+  function addSceneLayer(layer) {
+    const conv = getActiveConversation()
+    if (!conv.sceneLayers) conv.sceneLayers = []
+    const l = {
+      id: 'layer_' + nextLayerId++,
+      name: layer.name || 'Untitled',
+      type: layer.type, // 'zone' or 'file'
+      source: layer.source,
+      visible: true,
+      opacity: layer.opacity ?? 1.0,
+    }
+    conv.sceneLayers.push(l)
+    touchActive()
+    scheduleSave()
+    return l
+  }
+
+  function removeSceneLayer(id) {
+    const conv = getActiveConversation()
+    if (!conv.sceneLayers) return
+    const idx = conv.sceneLayers.findIndex(l => l.id === id)
+    if (idx >= 0) {
+      conv.sceneLayers.splice(idx, 1)
+      touchActive()
+      scheduleSave()
+    }
+  }
+
+  function toggleLayerVisibility(id) {
+    const conv = getActiveConversation()
+    if (!conv.sceneLayers) return
+    const layer = conv.sceneLayers.find(l => l.id === id)
+    if (layer) {
+      layer.visible = !layer.visible
+      touchActive()
+      scheduleSave()
+    }
+  }
+
+  function clearSceneLayers() {
+    const conv = getActiveConversation()
+    if (conv.sceneLayers) {
+      conv.sceneLayers.length = 0
+      touchActive()
+      scheduleSave()
+    }
+  }
+
   function clearAll() {
     const conv = getActiveConversation()
     conv.messages.length = 0
     conv.artifacts.length = 0
     conv.activeArtifactIndex = -1
+    if (conv.sceneLayers) conv.sceneLayers.length = 0
     scheduleSave()
   }
 
@@ -345,5 +399,11 @@ export function useChatStore() {
     closeArtifactList,
     openArtifactList,
     clearAll,
+    // scene layers
+    activeSceneLayers,
+    addSceneLayer,
+    removeSceneLayer,
+    toggleLayerVisibility,
+    clearSceneLayers,
   }
 }
