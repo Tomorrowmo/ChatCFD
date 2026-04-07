@@ -56,19 +56,15 @@ function formatArgsHint(tool, args) {
 // Use parts if available, otherwise fall back to plain content
 const hasParts = computed(() => props.parts && props.parts.length > 0)
 
-// Convert file paths in text to clickable links
+// Convert file paths in text to clickable links that open in file explorer
 function linkifyPaths(text) {
   if (!text) return ''
-  // Escape HTML first
   const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  // Match file paths: D:/... or /path/to/file with common extensions
   return escaped.replace(
     /([A-Z]:[\\/][\w.\-\\/]+\.(?:csv|png|jpg|vtp|vtm|vts|cgns|plt|dat|case))/gi,
     (match) => {
-      const safePath = match.split('/').map(s => encodeURIComponent(s)).join('/')
-      const url = `http://localhost:8000/api/file/${safePath}`
-      const filename = match.split(/[\\/]/).pop()
-      return `<a href="${url}" target="_blank" class="file-link" title="${match}">${match}</a>`
+      const escapedPath = match.replace(/'/g, "\\'")
+      return `<a href="#" class="file-link" title="在文件管理器中打开" onclick="event.preventDefault();fetch('http://localhost:8000/api/open-folder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:'${escapedPath}'})}).catch(()=>{})">${match}</a>`
     }
   )
 }
