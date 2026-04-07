@@ -15,7 +15,6 @@ function typeIcon(type) {
 
 <template>
   <div class="artifact-list" v-if="activeArtifacts.length">
-    <div class="list-header">History</div>
     <div
       v-for="(art, idx) in activeArtifacts"
       :key="art.id"
@@ -34,19 +33,9 @@ function typeIcon(type) {
 
 <style scoped>
 .artifact-list {
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-  max-height: 35%;
+  flex: 1;
   overflow-y: auto;
-}
-
-.list-header {
-  padding: 10px 20px 6px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
+  min-height: 0;
 }
 
 .artifact-item {

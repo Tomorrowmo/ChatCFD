@@ -23,6 +23,7 @@ const state = reactive({
   conversations: {}, // id -> conversation
   activeConversationId: null,
   artifactPanelOpen: false, // global: is the right panel showing an artifact?
+  artifactListVisible: true, // history list visible (when viewer closed)
 })
 
 // --- Persistence ---
@@ -292,6 +293,19 @@ export function useChatStore() {
 
   function closeArtifactPanel() {
     state.artifactPanelOpen = false
+    state.artifactListVisible = true
+  }
+
+  function toggleArtifactList() {
+    state.artifactListVisible = !state.artifactListVisible
+  }
+
+  function closeArtifactList() {
+    state.artifactListVisible = false
+  }
+
+  function openArtifactList() {
+    state.artifactListVisible = true
   }
 
   function clearAll() {
@@ -327,6 +341,9 @@ export function useChatStore() {
     setActiveArtifact,
     openArtifactPanel,
     closeArtifactPanel,
+    toggleArtifactList,
+    closeArtifactList,
+    openArtifactList,
     clearAll,
   }
 }
