@@ -131,8 +131,8 @@ function linkifyPaths(text) {
 }
 
 .bubble.user {
-  background: var(--bg-user-msg);
-  color: #fff;
+  background: #f0ece8;
+  color: var(--text-primary);
   border-bottom-right-radius: 4px;
 }
 
