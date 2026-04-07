@@ -4,6 +4,7 @@ import { useChatStore } from '../stores/chat.js'
 import JsonCard from './JsonCard.vue'
 import DataTable from './DataTable.vue'
 import VtkViewer from './VtkViewer.vue'
+import VtpBrowser from './VtpBrowser.vue'
 import MeshBrowser from './MeshBrowser.vue'
 
 const { activeArtifact, closeArtifactPanel } = useChatStore()
@@ -73,7 +74,7 @@ const viewerTypeLabel = computed(() => {
         :data="activeArtifact.data"
       />
 
-      <VtkViewer
+      <VtpBrowser
         v-else-if="viewerType === 'vtk'"
         :path="activeArtifact.file_path"
       />
