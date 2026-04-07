@@ -1,24 +1,25 @@
 :root {
-  --bg-primary: #1a1b23;
-  --bg-secondary: #22232d;
-  --bg-tertiary: #2a2b37;
-  --bg-input: #2e2f3b;
-  --bg-hover: #333442;
-  --bg-user-msg: #2563eb;
-  --bg-ai-msg: #2a2b37;
-  --text-primary: #e4e5ed;
-  --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
-  --border: #363848;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --error: #ef4444;
-  --shadow: rgba(0, 0, 0, 0.3) 0 4px 12px;
+  /* Claude-inspired warm dark theme */
+  --bg-primary: #2b2a27;
+  --bg-secondary: #302f2b;
+  --bg-tertiary: #3a3935;
+  --bg-input: #3a3935;
+  --bg-hover: #45443f;
+  --bg-user-msg: #da7756;
+  --bg-ai-msg: #363530;
+  --text-primary: #ececea;
+  --text-secondary: #a8a8a2;
+  --text-muted: #78776f;
+  --border: #4a4940;
+  --accent: #da7756;
+  --accent-hover: #c4654a;
+  --success: #5bb98c;
+  --warning: #e0a84e;
+  --error: #dc6258;
+  --shadow: rgba(0, 0, 0, 0.25) 0 4px 12px;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, 'Courier New', monospace;
+  --sans: 'Söhne', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Söhne Mono', ui-monospace, Consolas, 'Courier New', monospace;
 
   font: 14px/1.5 var(--sans);
   color: var(--text-primary);
