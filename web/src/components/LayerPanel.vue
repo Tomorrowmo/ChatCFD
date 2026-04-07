@@ -24,7 +24,7 @@ const liveZones = ref([])
 const newZone = ref('')
 const newScalar = ref('')
 const loadingZones = ref(false)
-const showAddControls = ref(false)
+const showAddControls = ref(true)  // default expanded so zone/scalar selectors are always visible
 
 const zones = computed(() =>
   liveZones.value.length ? liveZones.value : (props.meshData?.zones || [])
@@ -92,7 +92,6 @@ function toggleAdd() {
 
 onMounted(() => {
   if (props.meshData?.zones?.length) {
-    // Pre-populate from artifact data
     const z = props.meshData.zones
     if (z.length && !newZone.value) {
       newZone.value = z[0].name
@@ -100,6 +99,8 @@ onMounted(() => {
       newScalar.value = s?.raw_name || ''
     }
   }
+  // Always fetch live zones on mount
+  refreshZones()
 })
 </script>
 
