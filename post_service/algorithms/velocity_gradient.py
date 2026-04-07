@@ -108,6 +108,12 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
         result_mb.SetBlock(i, output)
         computed_names.append(block_name)
 
+    # Update the original multiblock in-place so session has new scalars
+    for i in range(n):
+        block = result_mb.GetBlock(i)
+        if block is not None:
+            multiblock.SetBlock(i, block)
+
     # Write output VTM file
     file_dir = os.path.dirname(post_data.file_path)
     out_dir = os.path.normpath(os.path.join(file_dir, "VelocityGradient")).replace("\\", "/")
@@ -139,9 +145,14 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
         f"Output: {out_path}"
     )
 
+    # Return updated zones data so frontend shows MeshBrowser with new scalars
+    # (PostData._zone_index now reflects the updated multiblock)
+    post_data._build_zone_index()  # refresh zone index after in-place update
+    zones_data = post_data.get_summary()
+
     return {
-        "type": "file",
+        "type": "numerical",
         "summary": summary,
-        "data": {"output_file": out_path},
+        "data": zones_data,  # contains zones[] → frontend routes to MeshBrowser
         "output_files": [out_path],
     }
