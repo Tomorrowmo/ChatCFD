@@ -56,36 +56,22 @@ SYSTEM_PROMPT_TEMPLATE = """\
 7. **力矩计算**：用户说"力/力矩/升力/阻力/CL/CD"
    → calculate(method="force_moment", zone_name="wall", params=...)
 
-8. **派生物理量（涡量/马赫数/Cp/声速）**：用户说"看涡量/马赫数/声速/Cp/速度梯度"
-   这些是需要**先计算再查看**的派生量。分三步引导：
+8. **派生物理量（涡量/马赫数/Cp/声速）**：用户说"看涡量/马赫数/声速/Cp"
+   这些量需要先计算。**直接一口气做完，不要反复问用户**。
 
-   **第 1 步：计算**
-   → calculate(method="velocity_gradient", zone_name="solid",
-     params='{"vorticity_switch":true,"mach_switch":true,"pressure_coefficient_switch":true}')
-   → 按需开启开关：vorticity_switch（涡量）、mach_switch（马赫数）、
-     pressure_coefficient_switch（Cp）、sound_speed_switch（声速）、velocity_amplitude_switch（速度幅值）
+   → 第 1 步：calculate(method="velocity_gradient", ...) 计算
+   → 第 2 步：根据物理量自动执行最佳可视化：
 
-   **第 2 步：告诉用户怎么看**
-   计算完成后，新标量已加入当前会话数据。告诉用户：
-   "已计算完成。请在右侧 3D 视图中点击 ↻ 刷新，然后在 Scalar 中选择对应物理量查看。"
+   **涡量**：涡结构用等值面看最清晰（云图看不出来）。
+   计算完后，自动接着做：
+   ① statistics 查 Vorticity 的 mean 和 std
+   ② contour 提取 Vorticity 等值面（取 mean+std 附近的值）
+   告诉用户："涡量等值面已生成，点 📎 查看。等值面比云图更容易识别涡结构。"
 
-   **第 3 步：给出可视化建议（重要！）**
-   根据物理量类型给出不同的查看建议：
+   **马赫数**：云图效果好。告诉用户："点 ↻ 刷新，Scalar 选 MachNumber 查看。"
+   超声速流场补一句："可以提取 Ma=1.0 等值面看激波位置。"
 
-   - **涡量（Vorticity）**：涡量值域跨度大，直接云图可能看不清涡结构。建议用户：
-     "涡量建议用等值面查看更清晰。我可以帮您：
-     1. 先用 statistics 查看涡量范围
-     2. 然后用等值面（contour）提取合适的涡量值，更容易识别涡结构
-     需要我帮您提取涡量等值面吗？"
-     如果用户同意，先 calculate(method="statistics") 查 Vorticity 的范围，
-     然后用 contour 提取一个合理的等值面（通常取 mean 或 mean+std 附近的值）。
-
-   - **马赫数（MachNumber）**：云图直接查看效果好。提示用户选 Scalar=MachNumber。
-     如果是超声速流，建议提取 Ma=1.0 的等值面看激波位置。
-
-   - **Cp（压力系数）**：云图效果好，建议在表面 zone（wall）上查看。
-
-   - **声速（SoundSpeed）/速度幅值（VelocityAmplitude）**：云图直接查看即可。
+   **Cp**：告诉用户："在表面 zone（wall）上选 Scalar=Cp 查看压力系数分布。"
 
 9. **标量统计**：用户说"压力范围/最大最小/平均值"
    → calculate(method="statistics", zone_name=...)
