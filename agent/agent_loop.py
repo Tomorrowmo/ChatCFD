@@ -10,6 +10,34 @@ from agent.session import AgentSession
 from agent.skills import build_system_prompt
 
 
+def _make_artifact_title(tool_name: str, args: dict, result: dict) -> str:
+    """Generate a descriptive artifact title from tool name + args."""
+    if tool_name == "calculate":
+        method = args.get("method", "")
+        zone = args.get("zone_name", "")
+        # Method-specific titles
+        titles = {
+            "statistics": f"Statistics: {zone}" if zone else "Statistics",
+            "force_moment": f"Force & Moment: {zone}" if zone else "Force & Moment",
+            "velocity_gradient": "Velocity Gradient (Vorticity/Mach)",
+            "slice": f"Slice: {zone}" if zone else "Slice",
+            "streamline": f"Streamlines: {zone}" if zone else "Streamlines",
+            "contour": f"Contour: {zone}" if zone else "Contour",
+            "render": f"Render: {zone}" if zone else "Render",
+            "compare": "Compare",
+        }
+        return titles.get(method, f"{method}: {zone}" if zone else method)
+    if tool_name == "exportData":
+        zone = args.get("zone", "")
+        fmt = args.get("format", "csv")
+        return f"Export: {zone}.{fmt}" if zone else f"Export ({fmt})"
+    if tool_name == "listFiles":
+        return "File List"
+    if tool_name == "getMethodTemplate":
+        return f"Methods: {args.get('method', 'all')}"
+    return f"{tool_name}"
+
+
 def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
         model: str = "qwen/qwen-plus", max_rounds: int = 10,
         mcp_session_id: str = "default") -> dict:
@@ -64,7 +92,7 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
                     if isinstance(parsed, dict) and "error" not in parsed:
                         if name == "loadFile":
                             artifacts.append({
-                                "title": f"loadFile: {parsed.get('file_path', 'unknown')}",
+                                "title": f"loadFile: {parsed.get('file_path', 'unknown').split('/')[-1]}",
                                 "type": "numerical",
                                 "summary": f"{parsed.get('zone_count', 0)} zones, {parsed.get('total_cells', 0)} cells, {parsed.get('total_points', 0)} points",
                                 "data": parsed,
@@ -72,7 +100,7 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
                             })
                         elif "summary" in parsed:
                             artifacts.append({
-                                "title": f"{name} result",
+                                "title": _make_artifact_title(name, args, parsed),
                                 "type": parsed.get("type", "numerical"),
                                 "summary": parsed.get("summary", ""),
                                 "data": parsed.get("data"),
@@ -198,16 +226,16 @@ def stream_run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
                         # calculate/export return unified {type, summary, data, output_files}
                         if name == "loadFile":
                             artifact = {
-                                "title": f"loadFile: {parsed.get('file_path', 'unknown')}",
+                                "title": f"loadFile: {parsed.get('file_path', 'unknown').split('/')[-1]}",
                                 "type": "numerical",
                                 "summary": f"{parsed.get('zone_count', 0)} zones, {parsed.get('total_cells', 0)} cells, {parsed.get('total_points', 0)} points",
-                                "data": parsed,  # full summary goes to data.zones for MeshBrowser
+                                "data": parsed,
                                 "output_files": [],
                             }
                             artifacts.append(artifact)
                         elif "summary" in parsed:
                             artifact = {
-                                "title": f"{name} result",
+                                "title": _make_artifact_title(name, args, parsed),
                                 "type": parsed.get("type", "numerical"),
                                 "summary": parsed.get("summary", ""),
                                 "data": parsed.get("data"),
