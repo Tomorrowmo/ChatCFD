@@ -113,6 +113,10 @@ function sortIndicator(colIdx) {
   background: var(--bg-tertiary);
   border-radius: 10px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 
 .table-status {
@@ -127,8 +131,9 @@ function sortIndicator(colIdx) {
 
 .table-scroll {
   overflow-x: auto;
-  max-height: 500px;
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .data-table {

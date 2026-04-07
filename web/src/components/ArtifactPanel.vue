@@ -163,9 +163,11 @@ const viewerTypeLabel = computed(() => {
 
 .viewer-area {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 16px 20px;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .viewer-empty {
