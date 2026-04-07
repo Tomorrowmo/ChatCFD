@@ -16,6 +16,7 @@ const props = defineProps({
   zone: { type: String, default: '' },
   scalarName: { type: String, default: '' },
   path: { type: String, default: '' },
+  displayMode: { type: String, default: 'surface' }, // 'surface' | 'surface+edges' | 'wireframe'
 })
 
 const containerRef = ref(null)
@@ -75,6 +76,21 @@ function addOrientationAxes() {
     widget.setMaxPixelSize(200)
   } catch (err) {
     console.warn('[VtkViewer] Could not add orientation axes:', err.message)
+  }
+}
+
+function applyDisplayMode(actor) {
+  const prop = actor.getProperty()
+  if (props.displayMode === 'wireframe') {
+    prop.setRepresentationToWireframe()
+    prop.setEdgeVisibility(false)
+  } else if (props.displayMode === 'surface+edges') {
+    prop.setRepresentationToSurface()
+    prop.setEdgeVisibility(true)
+    prop.setEdgeColor(0.2, 0.2, 0.2)
+  } else {
+    prop.setRepresentationToSurface()
+    prop.setEdgeVisibility(false)
   }
 }
 
@@ -161,10 +177,11 @@ async function loadData() {
 
     const actor = vtkActor.newInstance()
     actor.setMapper(mapper)
-    // If no scalar colored, give a neutral surface color (not red)
     if (!coloredArrayName) {
       actor.getProperty().setColor(0.7, 0.7, 0.75)
     }
+    // Apply display mode
+    applyDisplayMode(actor)
     renderer.addActor(actor)
 
     renderer.resetCamera()

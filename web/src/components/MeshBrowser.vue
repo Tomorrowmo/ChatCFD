@@ -11,6 +11,7 @@ const { activeConversation } = useChatStore()
 const sessionId = computed(() => activeConversation.value?.id || 'default')
 const selectedZone = ref('')
 const selectedScalar = ref('')
+const displayMode = ref('surface')  // 'surface' | 'surface+edges' | 'wireframe'
 const liveZones = ref([])
 const loading = ref(false)
 
@@ -82,6 +83,14 @@ watch(sessionId, () => { refreshZones() })
           </option>
         </select>
       </label>
+      <label>
+        Display:
+        <select v-model="displayMode">
+          <option value="surface">Surface</option>
+          <option value="surface+edges">Surface + Mesh</option>
+          <option value="wireframe">Wireframe</option>
+        </select>
+      </label>
       <button class="refresh-btn" @click="refreshZones" :disabled="loading" title="刷新标量列表">
         {{ loading ? '...' : '↻' }}
       </button>
@@ -91,6 +100,7 @@ watch(sessionId, () => { refreshZones() })
       :sessionId="sessionId"
       :zone="selectedZone"
       :scalarName="selectedScalar"
+      :displayMode="displayMode"
     />
   </div>
 </template>
