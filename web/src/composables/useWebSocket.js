@@ -4,6 +4,26 @@ import { useChatStore } from '../stores/chat.js'
 const AGENT_WS_URL = 'ws://localhost:8080/ws'
 const MOCK_MODE = false // Set to true for frontend-only development
 
+function formatArgsHint(tool, args) {
+  if (!args) return ''
+  // Show the most important arg inline, e.g. loadFile(file_path=...) -> "(ysy.cgns)"
+  if (tool === 'loadFile' && args.file_path) {
+    const name = args.file_path.split(/[\\/]/).pop()
+    return `(${name})`
+  }
+  if (tool === 'calculate' && args.method) {
+    const zone = args.zone_name ? ` on ${args.zone_name}` : ''
+    return `(${args.method}${zone})`
+  }
+  if (tool === 'exportData' && args.zone) {
+    return `(${args.zone})`
+  }
+  if (tool === 'listFiles' && args.directory) {
+    return `(${args.directory})`
+  }
+  return ''
+}
+
 // Mock responses for frontend development
 const MOCK_RESPONSES = [
   {
@@ -89,7 +109,14 @@ function createMockWebSocket() {
 }
 
 function createRealWebSocket() {
-  const { addArtifact, appendToStreaming, finalizeStreaming } = useChatStore()
+  const {
+    addArtifact,
+    appendToStreaming,
+    addToolCallPart,
+    finishToolCallPart,
+    finalizeStreaming,
+    activeConversation,
+  } = useChatStore()
   const ws = ref(null)
   let reconnectTimer = null
 
@@ -111,13 +138,12 @@ function createRealWebSocket() {
         const data = JSON.parse(event.data)
 
         if (data.type === 'token') {
-          // Streaming text token — append to current message
           appendToStreaming(data.content)
         } else if (data.type === 'tool_start') {
-          // Tool execution started — show status
-          appendToStreaming(`\n> Calling ${data.tool}...\n`)
+          // Create structured tool part with live spinner
+          addToolCallPart(data.tool, data.args || {})
         } else if (data.type === 'tool_result') {
-          // Tool finished — clear the "calling..." text will be replaced by final content
+          finishToolCallPart(data.tool, data.summary || 'done')
         } else if (data.type === 'done') {
           // Final message — add artifacts and finalize
           const artifactRefs = []
@@ -157,7 +183,8 @@ function createRealWebSocket() {
 
   function send(message) {
     if (ws.value && ws.value.readyState === WebSocket.OPEN) {
-      ws.value.send(JSON.stringify({ content: message }))
+      const conv_id = activeConversation.value?.id || 'default'
+      ws.value.send(JSON.stringify({ content: message, conversation_id: conv_id }))
     } else {
       console.warn('[WebSocket] Not connected, cannot send')
     }

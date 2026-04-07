@@ -5,7 +5,8 @@ import os
 
 
 class Harness:
-    def __init__(self, path_whitelist=None, max_file_size_mb=2048, max_return_chars=5000):
+    def __init__(self, path_whitelist=None, max_file_size_mb=0, max_return_chars=5000):
+        # max_file_size_mb=0 means no limit (local mode default)
         self.path_whitelist = [
             os.path.normpath(p).replace("\\", "/")
             for p in (path_whitelist or [])
@@ -26,8 +27,8 @@ class Harness:
             if not self._check_path(file_path):
                 return {"error": f"Path not in whitelist: {file_path}"}
 
-        # File size check
-        if tool_name == "loadFile" and file_path and os.path.exists(file_path):
+        # File size check (skip if limit is 0 = unlimited)
+        if self.max_file_size_mb > 0 and tool_name == "loadFile" and file_path and os.path.exists(file_path):
             size_mb = os.path.getsize(file_path) / (1024 * 1024)
             if size_mb > self.max_file_size_mb:
                 return {"error": f"File too large: {size_mb:.0f}MB (limit: {self.max_file_size_mb}MB)"}

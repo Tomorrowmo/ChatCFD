@@ -1,13 +1,12 @@
 <script setup>
 import { computed } from 'vue'
 import { useChatStore } from '../stores/chat.js'
-import ArtifactList from './ArtifactList.vue'
 import JsonCard from './JsonCard.vue'
 import DataTable from './DataTable.vue'
 import VtkViewer from './VtkViewer.vue'
 import MeshBrowser from './MeshBrowser.vue'
 
-const { activeArtifact, state } = useChatStore()
+const { activeArtifact, closeArtifactPanel } = useChatStore()
 
 const viewerType = computed(() => {
   const art = activeArtifact.value
@@ -26,19 +25,35 @@ const viewerType = computed(() => {
   }
   return 'json'
 })
+
+const viewerTypeLabel = computed(() => {
+  const t = viewerType.value
+  if (t === 'mesh') return '3D Mesh'
+  if (t === 'vtk') return '3D Viewer'
+  if (t === 'image') return 'Image'
+  if (t === 'table') return 'Data Table'
+  if (t === 'json') return 'Result'
+  return ''
+})
 </script>
 
 <template>
   <div class="artifact-panel">
     <div class="artifact-header">
-      <h2>Artifacts</h2>
-      <span class="count" v-if="state.artifacts.length">{{ state.artifacts.length }}</span>
+      <div class="header-left">
+        <span class="header-type">{{ viewerTypeLabel }}</span>
+        <h2 class="header-title truncate" v-if="activeArtifact">{{ activeArtifact.title }}</h2>
+      </div>
+      <button class="close-btn" @click="closeArtifactPanel" title="关闭">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M6 6 L18 18 M18 6 L6 18" stroke-linecap="round"/>
+        </svg>
+      </button>
     </div>
 
     <div class="viewer-area">
       <div v-if="!activeArtifact" class="viewer-empty">
         <p>No artifact selected</p>
-        <p class="viewer-hint">Artifacts from AI responses will appear here</p>
       </div>
 
       <JsonCard
@@ -70,8 +85,6 @@ const viewerType = computed(() => {
         :alt="activeArtifact.title"
       />
     </div>
-
-    <ArtifactList />
   </div>
 </template>
 
@@ -81,31 +94,69 @@ const viewerType = computed(() => {
   flex-direction: column;
   height: 100%;
   background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
 }
 
 .artifact-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 16px 20px;
+  gap: 12px;
+  padding: 12px 16px 12px 20px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 48px;
+}
+
+.header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.header-type {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
-.artifact-header h2 {
-  font-size: 18px;
-  font-weight: 600;
+.header-title {
+  font-size: 14px;
+  font-weight: 500;
   color: var(--text-primary);
   margin: 0;
+  min-width: 0;
+  flex: 1;
 }
 
-.count {
-  font-size: 11px;
-  padding: 1px 7px;
-  border-radius: 10px;
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
+.truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.close-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.close-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
 .viewer-area {
@@ -123,10 +174,6 @@ const viewerType = computed(() => {
   height: 100%;
   color: var(--text-muted);
   gap: 6px;
-}
-
-.viewer-hint {
-  font-size: 12px;
 }
 
 .artifact-image {

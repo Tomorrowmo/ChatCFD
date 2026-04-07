@@ -1948,3 +1948,135 @@ git commit -m "test: add integration tests for PostEngine"
 ```bash
 git push origin master
 ```
+
+---
+
+## Phase 1 完成情况（截至 2026-04-07）
+
+### 已完成（Task 1-16 + 额外功能）
+
+| Task | 内容 | 状态 |
+|------|------|:----:|
+| 1-3 | PostData + Session + AlgorithmRegistry | ✅ |
+| 4-6 | statistics / force_moment / velocity_gradient | ✅ |
+| 7 | PostEngine 计算引擎 | ✅ |
+| 8 | MCP 端点层（6 tool 薄壳） | ✅ |
+| 9 | HTTP API 端点层 | ✅ |
+| 10 | server.py 入口 | ✅ |
+| 11 | Agent MCP Client | ✅ |
+| 12 | Agent Harness | ✅ |
+| 13 | Agent Session + Skills + InsightLog | ✅ |
+| 14 | Agent Loop | ✅ |
+| 15 | Agent main.py | ✅ |
+| 16 | 集成测试 | ✅ 88 tests |
+| 额外 | slice 切片（VTK 标准 filter） | ✅ |
+| 额外 | render 离屏渲染（PNG） | ✅ |
+| 额外 | compare 区域对比 | ✅ |
+| 额外 | 分析存档 .chatcfd/ | ✅ |
+| 额外 | 流式输出（token streaming） | ✅ |
+| 额外 | Sidebar 会话管理（Claude 风格） | ✅ |
+| 额外 | 多会话隔离（conversation_id 全链路） | ✅ |
+| 额外 | Settings 面板（运行时切换模型） | ✅ |
+| 额外 | 交互式 3D 流场（VTP + VTK.js） | ⚠️ 加载OK，云图着色待修 |
+
+### 待修复
+
+- VTK.js 云图着色（scalar coloring）不生效 — 需调试 VTK.js mapper API
+- 已修但待提交：Sidebar 折叠/展开、Artifact 面板 Claude 风格、自动滚动、输入框布局
+
+---
+
+## Phase 1.5: 物理量映射表升级
+
+**数据源**: `docs/20260331 多专业标准物理量映射表v5.xlsx`（15 个 Sheet，覆盖 10 个求解器）
+
+### 背景
+
+当前 `physical_mapping.json` 只有 8 条手填映射，无求解器区分。映射表包含 89 种标准物理量、10 个求解器独立映射，且有量纲换算、置信度、同名异义检测、值域范围辅助判断。
+
+**核心风险**：同名变量 "p" 在不同求解器含义不同：
+- OpenFOAM 不可压：运动压力 m²/s²（需 ×ρ 换算）
+- OpenFOAM 可压：真实静压 Pa
+- Fluent：表压 Pa（需 +101325）
+- CFX：绝对静压 Pa
+
+当前实现把所有 "p" 都映射为 "pressure"，OpenFOAM 不可压用户力系数会差 ~1000 倍。
+
+### 方案 A（Phase 1.5，先做）
+
+用脚本把 Excel 转成**分求解器的 JSON**，替换 `physical_mapping.json`。
+
+**Task 17: Excel → JSON 转换脚本**
+
+**Files:**
+- Create: `scripts/convert_mapping_excel.py`
+- Create: `post_service/config/solver_mappings/` 目录
+- Modify: `post_service/config/physical_mapping.json` → 新格式
+
+**新 JSON 格式:**
+```json
+{
+  "standard_quantities": {
+    "pressure": {"display_name": "静压", "unit": "Pa", "type": "scalar"},
+    "pressure_kinematic": {"display_name": "运动压力", "unit": "m²/s²", "type": "scalar"},
+    ...共89条
+  },
+  "solver_mappings": {
+    "OpenFOAM_incompressible": {
+      "p": {"physical_name": "pressure_kinematic", "conversion": "multiply_density", "confidence": "HIGH"},
+      "U": {"physical_name": "velocity_vector", "confidence": "HIGH"},
+      ...
+    },
+    "Fluent": {
+      "pressure": {"physical_name": "pressure", "conversion": "add_operating_pressure", "confidence": "HIGH"},
+      "x-velocity": {"physical_name": "velocity_x", "confidence": "HIGH"},
+      ...
+    },
+    "CGNS": { ... },
+    "Tecplot": { ... },
+    ...共10个求解器
+  },
+  "value_ranges": {
+    "pressure": {"min": -5000, "max": 300000, "unit": "Pa"},
+    "pressure_kinematic": {"min": -500, "max": 5000, "unit": "m²/s²"},
+    ...共30条
+  },
+  "ambiguous_names": {
+    "p": [
+      {"solver": "OpenFOAM_incompressible", "physical_name": "pressure_kinematic"},
+      {"solver": "OpenFOAM_compressible", "physical_name": "pressure"},
+      {"solver": "Fluent", "physical_name": "pressure"},
+      {"solver": "CFX", "physical_name": "pressure"}
+    ],
+    ...共14条
+  }
+}
+```
+
+**Task 18: PostData 适配新映射格式**
+
+**Files:**
+- Modify: `post_service/post_data.py`
+
+`_resolve_name()` 改为：
+1. 如果已知求解器类型 → 用对应 solver_mappings 查找
+2. 未知求解器 → 遍历所有 solver_mappings 匹配，取置信度最高的
+3. 置信度 LOW → 结合 value_ranges 辅助判断
+4. 仍不确定 → 在 summary 中标注"推断，请确认"
+
+**Task 19: 求解器自动识别**
+
+**Files:**
+- Create: `post_service/solver_detector.py`
+
+根据 Sheet 2（求解器识别规则）实现：
+- 文件格式特征（CGNS → HDF5 根节点、PLT → 魔数）
+- 变量名模式匹配（有 "nut" → 可能 OpenFOAM）
+- 返回 `{"solver": "Fluent", "confidence": "HIGH"}` 或 `{"solver": "unknown"}`
+
+### 方案 B（Phase 2，后做）
+
+- 量纲换算自动执行（conversion 字段）
+- LLM 辅助推断未知变量
+- 用户确认后写入 user_mappings/ 复用
+- Excel ↔ JSON 双向同步脚本

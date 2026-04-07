@@ -28,7 +28,7 @@ def setup(app, engine):
             geo.Update()
             polydata = geo.GetOutput()
 
-            # Write to in-memory VTP (XML PolyData, binary + zlib)
+            # Write to in-memory VTP (XML PolyData, binary + zlib — fastest on the wire)
             writer = vtk.vtkXMLPolyDataWriter()
             writer.SetDataModeToBinary()
             writer.SetCompressorTypeToZLib()

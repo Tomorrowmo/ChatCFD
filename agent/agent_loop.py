@@ -11,7 +11,8 @@ from agent.skills import build_system_prompt
 
 
 def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
-        model: str = "qwen/qwen-plus", max_rounds: int = 10) -> dict:
+        model: str = "qwen/qwen-plus", max_rounds: int = 10,
+        mcp_session_id: str = "default") -> dict:
     """Execute the agent loop: LLM reasoning with tool dispatch.
 
     Returns {"content": str, "artifacts": list[dict]} where artifacts are
@@ -43,6 +44,9 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
             except json.JSONDecodeError:
                 args = {}
 
+            # Transparently inject session_id so the LLM doesn't manage it
+            args["session_id"] = mcp_session_id
+
             # Harness before-check
             blocked = harness.before_call(
                 name, args,
@@ -57,14 +61,23 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
                     parsed = harness.after_call(name, parsed)
                     result = json.dumps(parsed, ensure_ascii=False)
                     # Collect artifacts from tool results
-                    if isinstance(parsed, dict) and "summary" in parsed:
-                        artifacts.append({
-                            "title": f"{name} result",
-                            "type": parsed.get("type", "numerical"),
-                            "summary": parsed.get("summary", ""),
-                            "data": parsed.get("data"),
-                            "output_files": parsed.get("output_files", []),
-                        })
+                    if isinstance(parsed, dict) and "error" not in parsed:
+                        if name == "loadFile":
+                            artifacts.append({
+                                "title": f"loadFile: {parsed.get('file_path', 'unknown')}",
+                                "type": "numerical",
+                                "summary": f"{parsed.get('zone_count', 0)} zones, {parsed.get('total_cells', 0)} cells, {parsed.get('total_points', 0)} points",
+                                "data": parsed,
+                                "output_files": [],
+                            })
+                        elif "summary" in parsed:
+                            artifacts.append({
+                                "title": f"{name} result",
+                                "type": parsed.get("type", "numerical"),
+                                "summary": parsed.get("summary", ""),
+                                "data": parsed.get("data"),
+                                "output_files": parsed.get("output_files", []),
+                            })
                 except json.JSONDecodeError:
                     result = raw
             else:
@@ -80,7 +93,8 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
 
 
 def stream_run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
-               model: str = "qwen/qwen-plus", max_rounds: int = 10):
+               model: str = "qwen/qwen-plus", max_rounds: int = 10,
+               mcp_session_id: str = "default"):
     """Generator version of run(). Yields dicts for WebSocket streaming.
 
     Yields:
@@ -162,6 +176,9 @@ def stream_run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
             except json.JSONDecodeError:
                 args = {}
 
+            # Transparently inject session_id so the LLM doesn't manage it
+            args["session_id"] = mcp_session_id
+
             yield {"type": "tool_start", "tool": name, "args": args}
 
             blocked = harness.before_call(
@@ -176,15 +193,27 @@ def stream_run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
                     parsed = json.loads(raw)
                     parsed = harness.after_call(name, parsed)
                     result = json.dumps(parsed, ensure_ascii=False)
-                    if isinstance(parsed, dict) and "summary" in parsed:
-                        artifact = {
-                            "title": f"{name} result",
-                            "type": parsed.get("type", "numerical"),
-                            "summary": parsed.get("summary", ""),
-                            "data": parsed.get("data"),
-                            "output_files": parsed.get("output_files", []),
-                        }
-                        artifacts.append(artifact)
+                    if isinstance(parsed, dict) and "error" not in parsed:
+                        # loadFile returns {file_path, zones, ...} directly (not in "data")
+                        # calculate/export return unified {type, summary, data, output_files}
+                        if name == "loadFile":
+                            artifact = {
+                                "title": f"loadFile: {parsed.get('file_path', 'unknown')}",
+                                "type": "numerical",
+                                "summary": f"{parsed.get('zone_count', 0)} zones, {parsed.get('total_cells', 0)} cells, {parsed.get('total_points', 0)} points",
+                                "data": parsed,  # full summary goes to data.zones for MeshBrowser
+                                "output_files": [],
+                            }
+                            artifacts.append(artifact)
+                        elif "summary" in parsed:
+                            artifact = {
+                                "title": f"{name} result",
+                                "type": parsed.get("type", "numerical"),
+                                "summary": parsed.get("summary", ""),
+                                "data": parsed.get("data"),
+                                "output_files": parsed.get("output_files", []),
+                            }
+                            artifacts.append(artifact)
                 except json.JSONDecodeError:
                     result = raw
             else:

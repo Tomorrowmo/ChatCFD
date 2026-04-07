@@ -15,6 +15,12 @@ __pycache__/
 .vscode/
 .idea/
 
+# Runtime data
+.chatcfd/
+
+# Generated HTML
+docs/*.html
+
 # OS
 .DS_Store
 Thumbs.db

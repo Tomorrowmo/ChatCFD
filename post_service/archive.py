@@ -19,12 +19,18 @@ class AnalysisArchive:
 
     @staticmethod
     def file_md5(file_path):
-        """Compute MD5 hex digest of a file."""
+        """Compute MD5 hex digest of a file (slow for large files — use only when saving)."""
         h = hashlib.md5()
         with open(file_path, "rb") as f:
             for chunk in iter(lambda: f.read(8192), b""):
                 h.update(chunk)
         return h.hexdigest()
+
+    @staticmethod
+    def file_fingerprint(file_path):
+        """Fast fingerprint: size + mtime (instant, no file read)."""
+        st = os.stat(file_path)
+        return f"{st.st_size}_{int(st.st_mtime)}"
 
     @staticmethod
     def load(file_path):
@@ -45,7 +51,7 @@ class AnalysisArchive:
         if archive is None:
             archive = {
                 "file": os.path.basename(file_path),
-                "file_md5": AnalysisArchive.file_md5(file_path),
+                "file_fingerprint": AnalysisArchive.file_fingerprint(file_path),
                 "entries": [],
             }
 
@@ -66,16 +72,20 @@ class AnalysisArchive:
 
     @staticmethod
     def check_consistency(file_path):
-        """Check if file has changed since archive was created."""
+        """Check if file has changed since archive was created.
+        Uses fast fingerprint (size+mtime) by default, not full MD5.
+        """
         archive = AnalysisArchive.load(file_path)
         if archive is None:
             return {"has_archive": False}
-        current_md5 = AnalysisArchive.file_md5(file_path)
-        matches = current_md5 == archive.get("file_md5", "")
+        # Fast check: fingerprint instead of MD5
+        current_fp = AnalysisArchive.file_fingerprint(file_path)
+        stored_fp = archive.get("file_fingerprint", "")
+        matches = current_fp == stored_fp if stored_fp else False
         return {
             "has_archive": True,
             "entries_count": len(archive.get("entries", [])),
-            "md5_matches": matches,
+            "md5_matches": matches,  # keep key for backward compat
             "message": "历史存档可用"
             if matches
             else "文件已更新，历史存档可能不适用",

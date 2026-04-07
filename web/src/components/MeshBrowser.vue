@@ -1,12 +1,14 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
 import VtkViewer from './VtkViewer.vue'
+import { useChatStore } from '../stores/chat.js'
 
 const props = defineProps({
   data: Object, // loadFile summary: {zones: [{name, scalars: [{raw_name, display_name, ...}]}]}
 })
 
-const sessionId = 'default' // Phase 1 uses default session
+const { activeConversation } = useChatStore()
+const sessionId = computed(() => activeConversation.value?.id || 'default')
 const selectedZone = ref('')
 const selectedScalar = ref('')
 

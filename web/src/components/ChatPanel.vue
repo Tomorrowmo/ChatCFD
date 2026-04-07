@@ -1,14 +1,17 @@
 <script setup>
-import { ref, nextTick, watch, onMounted } from 'vue'
+import { ref, nextTick, watch, onMounted, computed } from 'vue'
 import MessageBubble from './MessageBubble.vue'
 import { useChatStore } from '../stores/chat.js'
 import { useWebSocket } from '../composables/useWebSocket.js'
 
-const { state, addMessage } = useChatStore()
+const { activeConversation, activeMessages, addMessage } = useChatStore()
 const ws = useWebSocket()
 
 const inputText = ref('')
 const messageListRef = ref(null)
+
+const title = computed(() => activeConversation.value?.title || 'ChatCFD')
+const messages = activeMessages
 
 onMounted(() => {
   ws.connect()
@@ -26,40 +29,97 @@ function sendMessage() {
 function onKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
-    sendMessage()
+    sendMessageWithScroll()
   }
 }
 
-// Auto-scroll to bottom on new messages
+// Track whether the user is pinned to the bottom. Start true, set false if
+// the user scrolls up, set true again when they scroll back to the bottom.
+const isAtBottom = ref(true)
+const BOTTOM_THRESHOLD = 40  // px tolerance
+
+function checkAtBottom() {
+  const el = messageListRef.value
+  if (!el) return
+  const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+  isAtBottom.value = distance < BOTTOM_THRESHOLD
+}
+
+function scrollToBottom() {
+  if (messageListRef.value) {
+    messageListRef.value.scrollTop = messageListRef.value.scrollHeight
+  }
+}
+
+function scrollToBottomIfPinned() {
+  if (isAtBottom.value) {
+    scrollToBottom()
+  }
+}
+
+// Only follow new content when user is already at the bottom
 watch(
-  () => state.messages.length,
+  () => messages.value,
   async () => {
     await nextTick()
-    if (messageListRef.value) {
-      messageListRef.value.scrollTop = messageListRef.value.scrollHeight
-    }
+    scrollToBottomIfPinned()
+  },
+  { deep: true }
+)
+
+watch(
+  () => {
+    const last = messages.value[messages.value.length - 1]
+    if (!last) return 0
+    const partsLen = (last.parts || []).reduce(
+      (sum, p) => sum + (p.content?.length || 0) + (p.summary?.length || 0),
+      0
+    )
+    return (last.content?.length || 0) + partsLen
+  },
+  async () => {
+    await nextTick()
+    scrollToBottomIfPinned()
   }
 )
+
+// Always scroll to bottom when switching conversations
+watch(
+  () => activeConversation.value?.id,
+  async () => {
+    await nextTick()
+    isAtBottom.value = true
+    scrollToBottom()
+  }
+)
+
+// When user sends a message, jump back to bottom regardless
+function sendMessageWithScroll() {
+  sendMessage()
+  isAtBottom.value = true
+  nextTick(() => scrollToBottom())
+}
 </script>
 
 <template>
   <div class="chat-panel">
     <div class="chat-header">
-      <h2>ChatCFD</h2>
+      <h2 class="truncate">{{ title }}</h2>
       <span class="badge">Phase 1</span>
     </div>
 
-    <div class="message-list" ref="messageListRef">
-      <div v-if="state.messages.length === 0" class="empty-state">
+    <div class="message-list" ref="messageListRef" @scroll="checkAtBottom">
+      <div v-if="messages.length === 0" class="empty-state">
         <p class="empty-title">Welcome to ChatCFD</p>
         <p class="empty-hint">Ask questions about your CFD simulation data.</p>
         <p class="empty-hint">Try: "Load the case file" or "Calculate forces on the wall zone"</p>
       </div>
       <MessageBubble
-        v-for="msg in state.messages"
+        v-for="msg in messages"
         :key="msg.id"
         :role="msg.role"
         :content="msg.content"
+        :parts="msg.parts || []"
         :artifacts="msg.artifacts"
       />
     </div>
@@ -71,7 +131,7 @@ watch(
         rows="2"
         @keydown="onKeydown"
       ></textarea>
-      <button class="send-btn" @click="sendMessage" :disabled="!inputText.trim()">
+      <button class="send-btn" @click="sendMessageWithScroll" :disabled="!inputText.trim()">
         Send
       </button>
     </div>
@@ -93,6 +153,7 @@ watch(
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .chat-header h2 {
@@ -100,6 +161,14 @@ watch(
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .badge {
@@ -108,6 +177,7 @@ watch(
   border-radius: 10px;
   background: var(--bg-tertiary);
   color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .message-list {

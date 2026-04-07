@@ -63,6 +63,16 @@ async function loadData() {
     reader.parseAsArrayBuffer(vtpBuffer)
     const polydata = reader.getOutputData(0)
 
+    // Debug: list available arrays
+    const pointArrNames = []
+    const cellArrNames = []
+    const pd = polydata.getPointData()
+    const cd = polydata.getCellData()
+    for (let i = 0; i < pd.getNumberOfArrays(); i++) pointArrNames.push(pd.getArrayByIndex(i).getName())
+    for (let i = 0; i < cd.getNumberOfArrays(); i++) cellArrNames.push(cd.getArrayByIndex(i).getName())
+    console.log('[VtkViewer] Loaded polydata. Point arrays:', pointArrNames, 'Cell arrays:', cellArrNames)
+    console.log('[VtkViewer] Requested scalar:', props.scalarName)
+
     const renderer = fullScreenRenderer.getRenderer()
     const renderWindow = fullScreenRenderer.getRenderWindow()
 
@@ -73,47 +83,59 @@ async function loadData() {
     mapper.setInputData(polydata)
 
     // Apply scalar coloring if requested
+    let coloredArrayName = null
     if (props.scalarName) {
-      const pointData = polydata.getPointData()
-      const cellData = polydata.getCellData()
-      let arr = pointData.getArrayByName(props.scalarName)
+      let arr = pd.getArrayByName(props.scalarName)
       let useCellData = false
       if (!arr) {
-        arr = cellData.getArrayByName(props.scalarName)
+        arr = cd.getArrayByName(props.scalarName)
         useCellData = true
       }
       if (arr) {
         const [lo, hi] = arr.getRange()
+        console.log(`[VtkViewer] Found scalar '${props.scalarName}' (${useCellData ? 'cell' : 'point'}), range=[${lo}, ${hi}]`)
+
+        // Build rainbow LUT
         const ctf = vtkColorTransferFunction.newInstance()
         const step = (hi - lo) / 4
-        ctf.addRGBPoint(lo, 0.0, 0.0, 1.0)
-        ctf.addRGBPoint(lo + step, 0.0, 1.0, 1.0)
-        ctf.addRGBPoint(lo + 2 * step, 0.0, 1.0, 0.0)
-        ctf.addRGBPoint(lo + 3 * step, 1.0, 1.0, 0.0)
-        ctf.addRGBPoint(hi, 1.0, 0.0, 0.0)
+        ctf.addRGBPoint(lo, 0.0, 0.0, 1.0)                 // blue
+        ctf.addRGBPoint(lo + step, 0.0, 1.0, 1.0)          // cyan
+        ctf.addRGBPoint(lo + 2 * step, 0.0, 1.0, 0.0)      // green
+        ctf.addRGBPoint(lo + 3 * step, 1.0, 1.0, 0.0)      // yellow
+        ctf.addRGBPoint(hi, 1.0, 0.0, 0.0)                 // red
 
+        // VTK.js scalar coloring: set active scalar on the dataset, then wire mapper
+        if (useCellData) {
+          cd.setActiveScalars(props.scalarName)
+          mapper.setScalarModeToUseCellData()
+        } else {
+          pd.setActiveScalars(props.scalarName)
+          mapper.setScalarModeToUsePointData()
+        }
         mapper.setLookupTable(ctf)
+        mapper.setUseLookupTableScalarRange(false)
         mapper.setScalarRange(lo, hi)
         mapper.setScalarVisibility(true)
-        if (useCellData) {
-          mapper.setScalarModeToUseCellData()
-          cellData.setActiveScalars(props.scalarName)
-        } else {
-          mapper.setScalarModeToUsePointData()
-          pointData.setActiveScalars(props.scalarName)
-        }
         mapper.setColorByArrayName(props.scalarName)
+
+        coloredArrayName = props.scalarName
 
         // Scalar bar
         const bar = vtkScalarBarActor.newInstance()
         bar.setScalarsToColors(ctf)
         bar.setAxisLabel(props.scalarName)
         renderer.addActor(bar)
+      } else {
+        console.warn(`[VtkViewer] Scalar '${props.scalarName}' NOT FOUND in polydata. Available point arrays:`, pointArrNames, 'cell arrays:', cellArrNames)
       }
     }
 
     const actor = vtkActor.newInstance()
     actor.setMapper(mapper)
+    // If no scalar colored, give a neutral surface color (not red)
+    if (!coloredArrayName) {
+      actor.getProperty().setColor(0.7, 0.7, 0.75)
+    }
     renderer.addActor(actor)
 
     renderer.resetCamera()

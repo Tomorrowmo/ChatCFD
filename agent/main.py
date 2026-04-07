@@ -26,7 +26,7 @@ AGENT_PORT = int(os.environ.get("AGENT_PORT", "8080"))
 
 # --- Shared state (initialized before server starts) ---
 mcp_client = MCPClient(MCP_URL)
-harness = Harness(max_file_size_mb=int(os.environ.get("MAX_FILE_SIZE_MB", "2048")))
+harness = Harness(max_file_size_mb=int(os.environ.get("MAX_FILE_SIZE_MB", "0")))  # 0 = unlimited (local mode)
 pool = SessionPool()
 
 # --- FastAPI app ---
@@ -42,9 +42,8 @@ app.add_middleware(
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
-    session_id = f"ws_{id(ws)}"
-    session = pool.get_or_create(session_id)
-    print(f"[Agent] WebSocket connected: {session_id}")
+    fallback_id = f"ws_{id(ws)}"
+    print(f"[Agent] WebSocket connected (fallback={fallback_id})")
 
     try:
         while True:
@@ -52,15 +51,21 @@ async def websocket_endpoint(ws: WebSocket):
             try:
                 data = json.loads(raw)
                 query = data.get("content", raw)
+                conv_id = data.get("conversation_id") or fallback_id
             except json.JSONDecodeError:
                 query = raw
+                conv_id = fallback_id
 
+            session = pool.get_or_create(conv_id)
             session.messages.append({"role": "user", "content": query})
 
             try:
                 # Run sync generator in thread executor so WS can flush between tokens
                 loop = asyncio.get_event_loop()
-                gen = agent_loop.stream_run(session, mcp_client, harness, model=MODEL)
+                gen = agent_loop.stream_run(
+                    session, mcp_client, harness, model=MODEL,
+                    mcp_session_id=conv_id,
+                )
                 while True:
                     event = await loop.run_in_executor(None, lambda: next(gen, None))
                     if event is None:
@@ -75,13 +80,25 @@ async def websocket_endpoint(ws: WebSocket):
                 })
 
             insight_log.log_query(
-                LOG_DIR, session_id, query,
+                LOG_DIR, conv_id, query,
                 resolution="tool_resolved",
                 tools_called=[],
             )
     except WebSocketDisconnect:
-        print(f"[Agent] WebSocket disconnected: {session_id}")
-        pool.destroy(session_id)
+        print(f"[Agent] WebSocket disconnected (fallback={fallback_id})")
+
+
+@app.post("/api/settings")
+async def update_settings(settings: dict):
+    global MODEL
+    if "model" in settings and settings["model"]:
+        MODEL = settings["model"]
+        print(f"[Agent] Model switched to: {MODEL}")
+    if "api_base" in settings and settings["api_base"]:
+        os.environ["OPENAI_API_BASE"] = settings["api_base"]
+        os.environ["LLM_API_BASE"] = settings["api_base"]
+        print(f"[Agent] API base updated")
+    return {"status": "ok", "model": MODEL}
 
 
 @app.get("/health")

@@ -1,7 +1,10 @@
 <script setup>
+import { computed } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 
-const { state, setActiveArtifact } = useChatStore()
+const { activeConversation, activeArtifacts, setActiveArtifact } = useChatStore()
+
+const activeIndex = computed(() => activeConversation.value?.activeArtifactIndex ?? -1)
 
 function typeIcon(type) {
   if (type === 'numerical') return '#'
@@ -11,13 +14,13 @@ function typeIcon(type) {
 </script>
 
 <template>
-  <div class="artifact-list" v-if="state.artifacts.length">
+  <div class="artifact-list" v-if="activeArtifacts.length">
     <div class="list-header">History</div>
     <div
-      v-for="(art, idx) in state.artifacts"
+      v-for="(art, idx) in activeArtifacts"
       :key="art.id"
       class="artifact-item"
-      :class="{ active: idx === state.activeArtifactIndex }"
+      :class="{ active: idx === activeIndex }"
       @click="setActiveArtifact(idx)"
     >
       <span class="item-icon">{{ typeIcon(art.type) }}</span>
