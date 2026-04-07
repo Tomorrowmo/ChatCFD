@@ -7,13 +7,13 @@ const SETTINGS_KEY = 'chatcfd.settings.v1'
 const AGENT_URL = 'http://localhost:8080'
 
 const MODELS = [
-  'qwen/qwen3-max',
-  'qwen/qwen-plus',
-  'qwen/qwen-max',
-  'qwen/qwen-turbo',
+  'openai/qwen3-max',
+  'openai/qwen-plus',
+  'openai/qwen-max',
+  'openai/qwen-turbo',
 ]
 
-const model = ref('qwen/qwen-plus')
+const model = ref('openai/qwen3-max')
 const apiBase = ref('')
 const saving = ref(false)
 const statusMsg = ref('')

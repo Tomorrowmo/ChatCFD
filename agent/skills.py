@@ -11,7 +11,7 @@ SYSTEM_PROMPT_TEMPLATE = """\
   - `force_moment` — 力/力矩积分，升力/阻力系数
   - `velocity_gradient` — 速度梯度、涡量、Cp、马赫数
   - `slice` — **切片**，切平面（2D 横截面）
-  - `render` — **云图/可视化**，生成 PNG 图片（表面+标量着色+颜色条）
+  - `render` — **离屏渲染**，生成 PNG 静态图片（仅当用户明确要导出图片时使用）
   - `compare` — 两区域标量对比
 - **exportData(zone, scalars, format)** — 导出数据到 CSV/VTM 文件
 - **listFiles(directory, suffix)** — 浏览目录
@@ -22,27 +22,34 @@ SYSTEM_PROMPT_TEMPLATE = """\
 1. **文件分析**：用户提到文件名
    → loadFile → 告诉用户有哪些区域和标量
 
-2. **云图/渲染/可视化**：用户说"云图/渲染/看图/图像/可视化/压力分布图"
+2. **查看云图/可视化/3D 流场**：用户说"云图/看流场/可视化/压力分布/查看表面"
+   → 不需要调 tool！loadFile 后前端右侧已自动打开 3D 交互视图（MeshBrowser），
+     用户可以在 zone/scalar 下拉框中选择查看不同区域和标量的云图，支持旋转/缩放/平移。
+     直接告诉用户"右侧已显示 3D 视图，您可以切换 zone 和 scalar 查看不同物理量"。
+
+3. **导出静态图片**：用户明确说"导出图片/生成截图/保存 PNG"
    → calculate(method="render", zone_name="wall", params='{"scalar":"Pressure"}')
-   → 返回 PNG 路径（前端会自动在 Artifact 侧边栏显示图片）
+   → 返回 PNG 文件路径
 
-3. **切片**：用户说"切片/切面/截面/slice"
-   → calculate(method="slice", zone_name="wall", params='{"normal":[1,0,0]}')
-   → normal 是切平面法向量，默认 [1,0,0] 表示 X 方向切
+4. **切片**：用户说"切片/切面/截面/slice"
+   → 【重要】切片必须用体网格 zone（如 solid/Elem 等体积区域），不要用表面 zone（如 wall/far）！
+     表面 zone 切出来只有线条，没有填充截面。
+   → calculate(method="slice", zone_name="solid", params='{"normal":[1,0,0]}')
+   → 返回 .vtp 文件，前端自动在右侧 3D 交互查看切片结果
 
-4. **力矩计算**：用户说"力/力矩/升力/阻力/CL/CD"
+5. **力矩计算**：用户说"力/力矩/升力/阻力/CL/CD"
    → calculate(method="force_moment", zone_name="wall", params=...)
 
-5. **速度梯度**：用户说"涡量/马赫数/声速"
+6. **速度梯度**：用户说"涡量/马赫数/声速"
    → calculate(method="velocity_gradient", params=...)
 
-6. **标量统计**：用户说"压力范围/最大最小/平均值"
+7. **标量统计**：用户说"压力范围/最大最小/平均值"
    → calculate(method="statistics", zone_name=...)
 
-7. **区域对比**：用户说"对比/比较 A 和 B"
+8. **区域对比**：用户说"对比/比较 A 和 B"
    → calculate(method="compare", params='{"scalar":"Pressure","zone_a":"wall","zone_b":"far"}')
 
-8. **数据导出**：用户说"提取/导出/CSV"
+9. **数据导出**：用户说"提取/导出/CSV"
    → exportData(zone=..., scalars=...)
 
 ## 重要规则
