@@ -113,11 +113,13 @@ def _inject_memory_after_load(session: AgentSession, mcp_pool: MCPClientPool,
 def _inject_global_preferences(session: AgentSession, mcp_pool: MCPClientPool):
     """At conversation start, inject user preferences from knowledge graph."""
     if not mcp_pool.has_tool("mempalace_kg_query"):
+        print("[Memory] kg_query tool not available, skipping preferences")
         return
     try:
         raw = mcp_pool.call_tool("mempalace_kg_query", {
             "entity": "user", "direction": "outgoing",
         })
+        print(f"[Memory] kg_query raw response: {raw[:200]}")
         result = json.loads(raw)
         facts = result.get("facts", [])
         current = [f for f in facts if f.get("current", True)]
@@ -125,6 +127,9 @@ def _inject_global_preferences(session: AgentSession, mcp_pool: MCPClientPool):
             lines = [f"{f['predicate']}: {f['object']}" for f in current]
             hint = "## 用户偏好\n" + "\n".join(f"- {l}" for l in lines)
             session.messages.insert(0, {"role": "system", "content": hint})
+            print(f"[Memory] Injected {len(current)} preferences")
+        else:
+            print("[Memory] No user preferences found")
     except Exception as e:
         print(f"[Memory] kg_query failed: {e}")
 

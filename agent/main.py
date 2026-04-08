@@ -22,8 +22,6 @@ os.environ.setdefault("no_proxy", "127.0.0.1,localhost")
 MODEL = os.environ.get("MODEL_ID", "qwen/qwen-plus")
 MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000/mcp/sse")
 MEMPALACE_ENABLED = os.environ.get("MEMPALACE_ENABLED", "false").lower() == "true"
-MEMPALACE_CMD = os.environ.get("MEMPALACE_CMD", "python")
-MEMPALACE_ARGS = os.environ.get("MEMPALACE_ARGS", "-m mempalace.mcp_server")
 LOG_DIR = os.environ.get("LOG_DIR", ".chatcfd")
 AGENT_PORT = int(os.environ.get("AGENT_PORT", "8080"))
 
@@ -46,6 +44,7 @@ app.add_middleware(
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     fallback_id = f"ws_{id(ws)}"
+    conv_id = fallback_id
     print(f"[Agent] WebSocket connected (fallback={fallback_id})")
 
     try:
@@ -156,7 +155,7 @@ def _init_mcp_pool():
     if MEMPALACE_ENABLED:
         mcp_pool.add_client(MCPClient(
             name="mempalace", transport="stdio",
-            command=MEMPALACE_CMD, args=MEMPALACE_ARGS.split(),
+            command=sys.executable, args=["-m", "mempalace.mcp_server"],
         ))
     mcp_pool.load_all_tools()
 
