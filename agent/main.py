@@ -89,6 +89,40 @@ async def websocket_endpoint(ws: WebSocket):
             )
     except WebSocketDisconnect:
         print(f"[Agent] WebSocket disconnected (fallback={fallback_id})")
+        # M2-4: Auto-extract key conclusions at conversation end
+        if MEMPALACE_ENABLED:
+            _try_extract_memories(conv_id)
+
+
+def _try_extract_memories(conv_id: str):
+    """At conversation end, check if there are artifacts worth saving to memory."""
+    session = pool.get(conv_id)
+    if not session or not mcp_pool.has_tool("mempalace_add_drawer"):
+        return
+    # Collect summaries from tool results in conversation
+    summaries = []
+    for msg in session.messages:
+        if msg.get("role") == "tool":
+            try:
+                data = json.loads(msg.get("content", "{}"))
+                if isinstance(data, dict) and "summary" in data and "error" not in data:
+                    summaries.append(data["summary"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+    if not summaries:
+        return
+    # Build a condensed summary of the conversation's key findings
+    combined = "; ".join(summaries[:5])  # cap at 5 to avoid huge content
+    wing = session.memory_wing or "default"
+    try:
+        from agent.agent_loop import _auto_dedup_drawer
+        if not _auto_dedup_drawer(mcp_pool, combined):
+            mcp_pool.call_tool("mempalace_add_drawer", {
+                "wing": wing, "room": "results", "content": combined,
+            })
+            print(f"[Memory] Auto-saved session summary to wing={wing}")
+    except Exception as e:
+        print(f"[Memory] Auto-save failed: {e}")
 
 
 @app.post("/api/settings")

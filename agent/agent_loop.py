@@ -62,19 +62,31 @@ def _make_artifact_title(tool_name: str, args: dict, result: dict) -> str:
 
 
 def _infer_wing(file_path: str) -> str:
-    """Infer mempalace wing name from file path (parent directory name)."""
+    """Infer mempalace wing name from file path.
+
+    Strategy: walk up from file, skip generic directory names, use the first
+    meaningful project-level directory as wing name.
+    """
     import os
-    path = file_path.replace("\\", "/")
-    parent = os.path.basename(os.path.dirname(path))
-    return parent.lower().replace(" ", "_").replace("-", "_") if parent else "default"
+    path = file_path.replace("\\", "/").rstrip("/")
+    parts = [p for p in path.split("/") if p]
+
+    # Skip the filename itself, walk up directories
+    skip = {"data", "cgns", "plt", "vtm", "case", "results", "output", "cases", "runs"}
+    for part in reversed(parts[:-1]):
+        name = part.lower().replace(" ", "_").replace("-", "_")
+        if name and name not in skip and not name.startswith(".") and len(name) > 1:
+            return name
+    return "default"
 
 
 def _inject_memory_after_load(session: AgentSession, mcp_pool: MCPClientPool,
                               file_path: str):
-    """After loadFile, infer wing and search for relevant memories."""
+    """After loadFile, infer wing (or use user override) and search for memories."""
     if not mcp_pool.has_tool("mempalace_search"):
         return
-    wing = _infer_wing(file_path)
+    # Use user-overridden wing if set, otherwise infer from path
+    wing = session.memory_wing or _infer_wing(file_path)
     session.memory_wing = wing
     session.loaded_file_path = file_path
     try:
@@ -109,6 +121,19 @@ def _inject_global_preferences(session: AgentSession, mcp_pool: MCPClientPool):
             session.messages.insert(0, {"role": "system", "content": hint})
     except Exception as e:
         print(f"[Memory] kg_query failed: {e}")
+
+
+def _auto_invalidate_old_preference(mcp_pool: MCPClientPool,
+                                    subject: str, predicate: str):
+    """Before kg_add, invalidate any existing fact with same subject+predicate."""
+    if not mcp_pool.has_tool("mempalace_kg_invalidate"):
+        return
+    try:
+        mcp_pool.call_tool("mempalace_kg_invalidate", {
+            "subject": subject, "predicate": predicate, "object": "",
+        })
+    except Exception:
+        pass  # best-effort: if old fact doesn't exist, invalidate is a no-op
 
 
 def _auto_dedup_drawer(mcp_pool: MCPClientPool, content: str) -> bool:
@@ -171,6 +196,9 @@ def run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
 
             # Auto-dedup before add_drawer
             if name == "mempalace_add_drawer":
+                # Auto-fill wing from session if not specified by LLM
+                if not args.get("wing") and session.memory_wing:
+                    args["wing"] = session.memory_wing
                 content = args.get("content", "")
                 if content and _auto_dedup_drawer(mcp_pool, content):
                     result = json.dumps({"info": "Duplicate content, skipped."})
@@ -178,6 +206,12 @@ def run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
                         "role": "tool", "tool_call_id": tc.id, "content": result,
                     })
                     continue
+
+            # Auto-invalidate old preference before kg_add
+            if name == "mempalace_kg_add":
+                _auto_invalidate_old_preference(
+                    mcp_pool, args.get("subject", ""), args.get("predicate", ""),
+                )
 
             # Harness before-check
             blocked = harness.before_call(
@@ -324,6 +358,8 @@ def stream_run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
 
             # Auto-dedup before add_drawer
             if name == "mempalace_add_drawer":
+                if not args.get("wing") and session.memory_wing:
+                    args["wing"] = session.memory_wing
                 content = args.get("content", "")
                 if content and _auto_dedup_drawer(mcp_pool, content):
                     session.messages.append({
@@ -332,6 +368,12 @@ def stream_run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
                     })
                     yield {"type": "tool_result", "tool": name, "summary": "duplicate, skipped"}
                     continue
+
+            # Auto-invalidate old preference before kg_add
+            if name == "mempalace_kg_add":
+                _auto_invalidate_old_preference(
+                    mcp_pool, args.get("subject", ""), args.get("predicate", ""),
+                )
 
             yield {"type": "tool_start", "tool": name, "args": args}
 

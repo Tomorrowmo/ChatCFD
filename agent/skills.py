@@ -69,8 +69,21 @@ RULES = """\
 记忆规则：
 1. 不要把每次 calculate 的原始数据都存入记忆，只存关键结论和发现
 2. 存入时物理量用「中文全称 + 英文缩写 + 数值」：如"升力系数 CL=0.45"
-3. room 从以下选择：results / parameters / visualization / findings / workflow
-4. wing 会自动从文件路径推断，不需要你管理"""
+3. wing 会自动填充，不需要你指定
+4. room 必须从以下选择（如果都不合适可以自定义）：
+
+| room | 存什么 | 示例 |
+|------|-------|------|
+| results | 数值结论 | "升力系数 CL=0.45, 阻力系数 CD=0.021" |
+| parameters | 用户常用参数 | "参考面积 1.0, 来流密度 1.225, 来流速度 340" |
+| visualization | 可视化偏好 | "涡量等值面阈值 mean+2std, 切面位置 x=0.3" |
+| findings | 工程发现 | "翼尖处存在明显流动分离" |
+| workflow | 工作流模式 | "用户习惯先算力矩再看涡量分布" |
+
+5. 用户偏好用 mempalace_kg_add 存（会自动覆盖旧偏好）：
+   - subject="user", predicate="prefers_reference_frame", object="body"
+   - subject="user", predicate="prefers_ref_area", object="1.0"
+6. 用户说"这个项目叫XX"时，更新当前 wing 名称"""
 
 
 def build_system_prompt() -> str:
