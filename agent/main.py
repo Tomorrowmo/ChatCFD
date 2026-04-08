@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from agent.mcp_client import MCPClient
+from agent.mcp_client import MCPClient, MCPClientPool
 from agent.harness import Harness
 from agent.session import SessionPool
 from agent import agent_loop, insight_log
@@ -21,11 +21,14 @@ os.environ.setdefault("no_proxy", "127.0.0.1,localhost")
 
 MODEL = os.environ.get("MODEL_ID", "qwen/qwen-plus")
 MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000/mcp/sse")
+MEMPALACE_ENABLED = os.environ.get("MEMPALACE_ENABLED", "false").lower() == "true"
+MEMPALACE_CMD = os.environ.get("MEMPALACE_CMD", "python")
+MEMPALACE_ARGS = os.environ.get("MEMPALACE_ARGS", "-m mempalace.mcp_server")
 LOG_DIR = os.environ.get("LOG_DIR", ".chatcfd")
 AGENT_PORT = int(os.environ.get("AGENT_PORT", "8080"))
 
 # --- Shared state (initialized before server starts) ---
-mcp_client = MCPClient(MCP_URL)
+mcp_pool = MCPClientPool()
 harness = Harness(max_file_size_mb=int(os.environ.get("MAX_FILE_SIZE_MB", "0")))  # 0 = unlimited (local mode)
 pool = SessionPool()
 
@@ -63,7 +66,7 @@ async def websocket_endpoint(ws: WebSocket):
                 # Run sync generator in thread executor so WS can flush between tokens
                 loop = asyncio.get_event_loop()
                 gen = agent_loop.stream_run(
-                    session, mcp_client, harness, model=MODEL,
+                    session, mcp_pool, harness, model=MODEL,
                     mcp_session_id=conv_id,
                 )
                 while True:
@@ -105,15 +108,29 @@ async def update_settings(settings: dict):
 def health():
     return {
         "status": "ok",
-        "tools": len(mcp_client._tools_raw),
+        "tools": len(mcp_pool._tool_route),
         "model": MODEL,
     }
 
 
 # --- CLI mode (fallback) ---
+def _init_mcp_pool():
+    """Register MCP servers and load all tools."""
+    mcp_pool.add_client(MCPClient(
+        name="post_service", transport="sse", url=MCP_URL,
+    ))
+    if MEMPALACE_ENABLED:
+        mcp_pool.add_client(MCPClient(
+            name="mempalace", transport="stdio",
+            command=MEMPALACE_CMD, args=MEMPALACE_ARGS.split(),
+        ))
+    mcp_pool.load_all_tools()
+
+
 def cli():
-    mcp_client.load_tools()
-    print(f"Loaded {len(mcp_client._tools_raw)} MCP tools: {list(mcp_client._tool_names)}")
+    _init_mcp_pool()
+    tool_names = list(mcp_pool._tool_route.keys())
+    print(f"Loaded {len(tool_names)} MCP tools: {tool_names}")
 
     session = pool.get_or_create("cli")
 
@@ -127,7 +144,7 @@ def cli():
             break
 
         session.messages.append({"role": "user", "content": query})
-        result = agent_loop.run(session, mcp_client, harness, model=MODEL)
+        result = agent_loop.run(session, mcp_pool, harness, model=MODEL)
         if result.get("content"):
             print(result["content"])
         for art in result.get("artifacts", []):
@@ -141,9 +158,12 @@ if __name__ == "__main__":
         cli()
     else:
         # Load MCP tools BEFORE starting uvicorn
-        mcp_client.load_tools()
-        print(f"[Agent] Loaded {len(mcp_client._tools_raw)} MCP tools: {list(mcp_client._tool_names)}")
+        _init_mcp_pool()
+        llm_tools = mcp_pool.get_tools_for_llm()
+        print(f"[Agent] {len(mcp_pool._tool_route)} total tools, {len(llm_tools)} exposed to LLM")
         print(f"[Agent] Starting WebSocket server on port {AGENT_PORT}")
         print(f"[Agent] Post service at {MCP_URL}")
+        if MEMPALACE_ENABLED:
+            print(f"[Agent] Mempalace enabled")
         print(f"[Agent] LLM model: {MODEL}")
         uvicorn.run(app, host="0.0.0.0", port=AGENT_PORT)

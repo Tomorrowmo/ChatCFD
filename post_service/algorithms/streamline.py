@@ -525,19 +525,7 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     tube.Update()
     streamline_poly = tube.GetOutput()
 
-    # --- Combine streamlines + body surface into one output ---
-    body_bounds_for_merge = _find_body_bounds(multiblock)
-    body_poly = _get_body_surface(multiblock)
-
-    if body_poly is not None:
-        # Append body surface + streamline tubes
-        appender = vtk.vtkAppendPolyData()
-        appender.AddInputData(body_poly)
-        appender.AddInputData(streamline_poly)
-        appender.Update()
-        output = appender.GetOutput()
-    else:
-        output = streamline_poly
+    output = streamline_poly
 
     # Save as VTP
     output_dir = os.path.dirname(post_data.file_path)

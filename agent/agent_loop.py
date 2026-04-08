@@ -5,7 +5,7 @@ import json
 import litellm
 
 from agent.harness import Harness
-from agent.mcp_client import MCPClient
+from agent.mcp_client import MCPClientPool
 from agent.session import AgentSession
 from agent.skills import build_system_prompt
 
@@ -61,7 +61,71 @@ def _make_artifact_title(tool_name: str, args: dict, result: dict) -> str:
     return tool_name
 
 
-def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
+def _infer_wing(file_path: str) -> str:
+    """Infer mempalace wing name from file path (parent directory name)."""
+    import os
+    path = file_path.replace("\\", "/")
+    parent = os.path.basename(os.path.dirname(path))
+    return parent.lower().replace(" ", "_").replace("-", "_") if parent else "default"
+
+
+def _inject_memory_after_load(session: AgentSession, mcp_pool: MCPClientPool,
+                              file_path: str):
+    """After loadFile, infer wing and search for relevant memories."""
+    if not mcp_pool.has_tool("mempalace_search"):
+        return
+    wing = _infer_wing(file_path)
+    session.memory_wing = wing
+    session.loaded_file_path = file_path
+    try:
+        raw = mcp_pool.call_tool("mempalace_search", {
+            "query": f"analysis of {file_path.split('/')[-1]}",
+            "wing": wing, "limit": 3,
+        })
+        result = json.loads(raw)
+        memories = result.get("results", [])
+        if memories:
+            texts = [m.get("text", "") for m in memories[:3]]
+            hint = "## 相关历史记忆\n" + "\n".join(f"- {t}" for t in texts)
+            session.messages.append({"role": "system", "content": hint})
+    except Exception as e:
+        print(f"[Memory] search failed: {e}")
+
+
+def _inject_global_preferences(session: AgentSession, mcp_pool: MCPClientPool):
+    """At conversation start, inject user preferences from knowledge graph."""
+    if not mcp_pool.has_tool("mempalace_kg_query"):
+        return
+    try:
+        raw = mcp_pool.call_tool("mempalace_kg_query", {
+            "entity": "user", "direction": "outgoing",
+        })
+        result = json.loads(raw)
+        facts = result.get("facts", [])
+        current = [f for f in facts if f.get("current", True)]
+        if current:
+            lines = [f"{f['predicate']}: {f['object']}" for f in current]
+            hint = "## 用户偏好\n" + "\n".join(f"- {l}" for l in lines)
+            session.messages.insert(0, {"role": "system", "content": hint})
+    except Exception as e:
+        print(f"[Memory] kg_query failed: {e}")
+
+
+def _auto_dedup_drawer(mcp_pool: MCPClientPool, content: str) -> bool:
+    """Check duplicate before add_drawer. Returns True if duplicate found."""
+    if not mcp_pool.has_tool("mempalace_check_duplicate"):
+        return False
+    try:
+        raw = mcp_pool.call_tool("mempalace_check_duplicate", {
+            "content": content, "threshold": 0.9,
+        })
+        result = json.loads(raw)
+        return result.get("is_duplicate", False)
+    except Exception:
+        return False
+
+
+def run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
         model: str = "qwen/qwen-plus", max_rounds: int = 10,
         mcp_session_id: str = "default") -> dict:
     """Execute the agent loop: LLM reasoning with tool dispatch.
@@ -69,8 +133,12 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
     Returns {"content": str, "artifacts": list[dict]} where artifacts are
     tool results that have type/summary/data fields (for frontend display).
     """
+    # Inject global user preferences at conversation start
+    if len(session.messages) <= 1:
+        _inject_global_preferences(session, mcp_pool)
+
     system_msg = {"role": "system", "content": build_system_prompt()}
-    tools = mcp_client.get_tools_for_llm()
+    tools = mcp_pool.get_tools_for_llm()
     artifacts = []
 
     for _ in range(max_rounds):
@@ -96,7 +164,20 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
                 args = {}
 
             # Transparently inject session_id so the LLM doesn't manage it
-            args["session_id"] = mcp_session_id
+            if name.startswith("mempalace_"):
+                pass  # mempalace tools don't use session_id
+            else:
+                args["session_id"] = mcp_session_id
+
+            # Auto-dedup before add_drawer
+            if name == "mempalace_add_drawer":
+                content = args.get("content", "")
+                if content and _auto_dedup_drawer(mcp_pool, content):
+                    result = json.dumps({"info": "Duplicate content, skipped."})
+                    session.messages.append({
+                        "role": "tool", "tool_call_id": tc.id, "content": result,
+                    })
+                    continue
 
             # Harness before-check
             blocked = harness.before_call(
@@ -105,8 +186,8 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
             )
             if blocked:
                 result = json.dumps(blocked, ensure_ascii=False)
-            elif mcp_client.has_tool(name):
-                raw = mcp_client.call_tool(name, args)
+            elif mcp_pool.has_tool(name):
+                raw = mcp_pool.call_tool(name, args)
                 try:
                     parsed = json.loads(raw)
                     parsed = harness.after_call(name, parsed)
@@ -121,6 +202,10 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
                                 "data": parsed,
                                 "output_files": [],
                             })
+                            # Memory: inject related memories after loadFile
+                            file_path = args.get("file_path", "")
+                            if file_path:
+                                _inject_memory_after_load(session, mcp_pool, file_path)
                         elif "summary" in parsed:
                             artifacts.append({
                                 "title": _make_artifact_title(name, args, parsed),
@@ -143,7 +228,7 @@ def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
     return {"content": "Maximum rounds reached.", "artifacts": artifacts}
 
 
-def stream_run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
+def stream_run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
                model: str = "qwen/qwen-plus", max_rounds: int = 10,
                mcp_session_id: str = "default"):
     """Generator version of run(). Yields dicts for WebSocket streaming.
@@ -154,8 +239,12 @@ def stream_run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
         {"type": "tool_result", "tool": "loadFile", ...}   — tool call finished
         {"type": "done", "content": "full text", "artifacts": [...]}  — final
     """
+    # Inject global user preferences at conversation start
+    if len(session.messages) <= 1:
+        _inject_global_preferences(session, mcp_pool)
+
     system_msg = {"role": "system", "content": build_system_prompt()}
-    tools = mcp_client.get_tools_for_llm()
+    tools = mcp_pool.get_tools_for_llm()
     artifacts = []
 
     for _ in range(max_rounds):
@@ -227,8 +316,22 @@ def stream_run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
             except json.JSONDecodeError:
                 args = {}
 
-            # Transparently inject session_id so the LLM doesn't manage it
-            args["session_id"] = mcp_session_id
+            # Transparently inject session_id (mempalace tools don't use it)
+            if name.startswith("mempalace_"):
+                pass
+            else:
+                args["session_id"] = mcp_session_id
+
+            # Auto-dedup before add_drawer
+            if name == "mempalace_add_drawer":
+                content = args.get("content", "")
+                if content and _auto_dedup_drawer(mcp_pool, content):
+                    session.messages.append({
+                        "role": "tool", "tool_call_id": tc["id"],
+                        "content": json.dumps({"info": "Duplicate content, skipped."}),
+                    })
+                    yield {"type": "tool_result", "tool": name, "summary": "duplicate, skipped"}
+                    continue
 
             yield {"type": "tool_start", "tool": name, "args": args}
 
@@ -238,15 +341,13 @@ def stream_run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
             )
             if blocked:
                 result = json.dumps(blocked, ensure_ascii=False)
-            elif mcp_client.has_tool(name):
-                raw = mcp_client.call_tool(name, args)
+            elif mcp_pool.has_tool(name):
+                raw = mcp_pool.call_tool(name, args)
                 try:
                     parsed = json.loads(raw)
                     parsed = harness.after_call(name, parsed)
                     result = json.dumps(parsed, ensure_ascii=False)
                     if isinstance(parsed, dict) and "error" not in parsed:
-                        # loadFile returns {file_path, zones, ...} directly (not in "data")
-                        # calculate/export return unified {type, summary, data, output_files}
                         if name == "loadFile":
                             artifact = {
                                 "title": f"loadFile: {parsed.get('file_path', 'unknown').split('/')[-1]}",
@@ -256,6 +357,10 @@ def stream_run(session: AgentSession, mcp_client: MCPClient, harness: Harness,
                                 "output_files": [],
                             }
                             artifacts.append(artifact)
+                            # Memory: inject related memories after loadFile
+                            file_path = args.get("file_path", "")
+                            if file_path:
+                                _inject_memory_after_load(session, mcp_pool, file_path)
                         elif "summary" in parsed:
                             artifact = {
                                 "title": _make_artifact_title(name, args, parsed),

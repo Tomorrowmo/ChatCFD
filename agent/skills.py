@@ -57,7 +57,20 @@ RULES = """\
 ### 参数格式
 - params 是 JSON 字符串：`'{"scalar":"Pressure"}'`
 - zone_name 从 loadFile 返回的 zones 列表中选
-- loadFile 只需调一次，后续复用"""
+- loadFile 只需调一次，后续复用
+
+### 记忆工具（如果可用）
+你可能有以下记忆工具，没有时忽略此节：
+- **mempalace_search(query, wing, room, limit)** — 搜索历史记忆。用户说"上次/之前/记得吗"时使用
+- **mempalace_add_drawer(wing, room, content)** — 存储重要发现。仅在得出关键结论时使用
+- **mempalace_kg_query(entity)** — 查询用户偏好（参照系/常用参数）
+- **mempalace_kg_add(subject, predicate, object)** — 记录用户偏好变更
+
+记忆规则：
+1. 不要把每次 calculate 的原始数据都存入记忆，只存关键结论和发现
+2. 存入时物理量用「中文全称 + 英文缩写 + 数值」：如"升力系数 CL=0.45"
+3. room 从以下选择：results / parameters / visualization / findings / workflow
+4. wing 会自动从文件路径推断，不需要你管理"""
 
 
 def build_system_prompt() -> str:

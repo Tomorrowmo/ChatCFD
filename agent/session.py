@@ -10,6 +10,9 @@ class AgentSession:
         self.user_confirmed_coding: bool = False
         self.created_at: float = time.time()
         self.last_active: float = time.time()
+        # Memory integration (Mempalace)
+        self.memory_wing: str | None = None
+        self.loaded_file_path: str | None = None
 
     def touch(self):
         self.last_active = time.time()
