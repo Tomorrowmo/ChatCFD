@@ -84,13 +84,17 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     writer = vtk.vtkXMLPolyDataWriter()
     writer.SetFileName(output_path)
     writer.SetInputData(output)
+    writer.SetDataModeToBinary()
+    writer.SetCompressorTypeToZLib()
     writer.Write()
 
+    result_id = f"slice_{id(output) % 100000:05d}"
     zone_label = zone_name or "all zones"
     return {
-        "type": "file",
+        "type": "geometry",
         "summary": f"Slice of {zone_label}: origin={origin}, normal={normal}, {n_points} points, {n_cells} cells. Saved to {output_path}",
         "data": {
+            "result_id": result_id,
             "output_file": output_path,
             "n_points": n_points,
             "n_cells": n_cells,
@@ -98,4 +102,5 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
             "normal": normal,
         },
         "output_files": [output_path],
+        "_vtk_output": output,
     }

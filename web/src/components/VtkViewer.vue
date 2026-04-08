@@ -16,8 +16,19 @@ const props = defineProps({
   zone: { type: String, default: '' },
   scalarName: { type: String, default: '' },
   path: { type: String, default: '' },
-  displayMode: { type: String, default: 'surface' }, // 'surface' | 'surface+edges' | 'wireframe'
+  displayMode: { type: String, default: 'surface' },
+  opacity: { type: Number, default: 1.0 },
+  colorPreset: { type: String, default: 'jet' },
 })
+
+const colorPresets = {
+  jet:         [[0,0,0,1], [0.25,0,1,1], [0.5,0,1,0], [0.75,1,1,0], [1,1,0,0]],
+  coolwarm:    [[0,0.231,0.298,0.753], [0.5,0.865,0.865,0.865], [1,0.706,0.016,0.150]],
+  rainbow:     [[0,0.278,0,0.714], [0.25,0,0,1], [0.5,0,1,0], [0.75,1,1,0], [1,1,0,0]],
+  viridis:     [[0,0.267,0.004,0.329], [0.25,0.282,0.141,0.457], [0.5,0.127,0.566,0.550], [0.75,0.544,0.774,0.247], [1,0.993,0.906,0.144]],
+  grayscale:   [[0,0,0,0], [1,1,1,1]],
+  blueRed:     [[0,0,0,1], [1,1,0,0]],
+}
 
 const containerRef = ref(null)
 const statusMsg = ref('')
@@ -29,9 +40,22 @@ onMounted(() => {
   if (props.path) loadFromFile()
   else if (props.zone) loadData()
   else statusMsg.value = 'Select a zone to view'
+
+  // "R" key to reset camera
+  window.addEventListener('keydown', onKeydown)
 })
 
+function onKeydown(e) {
+  if (e.key === 'r' || e.key === 'R') {
+    if (fullScreenRenderer && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+      fullScreenRenderer.getRenderer().resetCamera()
+      fullScreenRenderer.getRenderWindow().render()
+    }
+  }
+}
+
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
   if (fullScreenRenderer) {
     fullScreenRenderer.delete()
     fullScreenRenderer = null
@@ -57,8 +81,11 @@ function initViewer() {
   fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
     rootContainer: containerRef.value,
     containerStyle: { width: '100%', height: '100%' },
-    background: [0.15, 0.15, 0.18],
+    background: [0.92, 0.93, 0.95],
   })
+  // Lock up vector to prevent flipping during rotation
+  const camera = fullScreenRenderer.getRenderer().getActiveCamera()
+  camera.setViewUp(0, 1, 0)
 }
 
 function addOrientationAxes() {
@@ -140,14 +167,12 @@ async function loadData() {
         const [lo, hi] = arr.getRange()
         console.log(`[VtkViewer] Found scalar '${props.scalarName}' (${useCellData ? 'cell' : 'point'}), range=[${lo}, ${hi}]`)
 
-        // Build rainbow LUT
+        // Build LUT from color preset
         const ctf = vtkColorTransferFunction.newInstance()
-        const step = (hi - lo) / 4
-        ctf.addRGBPoint(lo, 0.0, 0.0, 1.0)                 // blue
-        ctf.addRGBPoint(lo + step, 0.0, 1.0, 1.0)          // cyan
-        ctf.addRGBPoint(lo + 2 * step, 0.0, 1.0, 0.0)      // green
-        ctf.addRGBPoint(lo + 3 * step, 1.0, 1.0, 0.0)      // yellow
-        ctf.addRGBPoint(hi, 1.0, 0.0, 0.0)                 // red
+        const preset = colorPresets[props.colorPreset] || colorPresets.jet
+        for (const [t, r, g, b] of preset) {
+          ctf.addRGBPoint(lo + t * (hi - lo), r, g, b)
+        }
 
         // VTK.js scalar coloring: set active scalar on the dataset, then wire mapper
         if (useCellData) {
@@ -177,6 +202,7 @@ async function loadData() {
 
     const actor = vtkActor.newInstance()
     actor.setMapper(mapper)
+    actor.getProperty().setOpacity(props.opacity)
     if (!coloredArrayName) {
       actor.getProperty().setColor(0.7, 0.7, 0.75)
     }
@@ -298,6 +324,15 @@ async function loadFromFile() {
     </div>
     <div class="viewer-container" ref="containerRef">
       <div v-if="statusMsg" class="viewer-overlay">{{ statusMsg }}</div>
+      <div class="viewer-hints">
+        <span class="hint-item"><kbd>L</kbd> Rotate</span>
+        <span class="hint-sep">|</span>
+        <span class="hint-item"><kbd>M</kbd> Pan</span>
+        <span class="hint-sep">|</span>
+        <span class="hint-item"><kbd>&#x2191;&#x2193;</kbd> Zoom</span>
+        <span class="hint-sep">|</span>
+        <span class="hint-item"><kbd>R</kbd> Reset</span>
+      </div>
     </div>
   </div>
 </template>
@@ -348,5 +383,42 @@ async function loadFromFile() {
   font-size: 14px;
   z-index: 1;
   pointer-events: none;
+}
+
+.viewer-hints {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  padding: 4px 10px;
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 2;
+  white-space: nowrap;
+}
+.hint-item {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.hint-item kbd {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: inherit;
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.4;
+}
+.hint-sep {
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 11px;
 }
 </style>

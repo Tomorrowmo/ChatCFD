@@ -12,6 +12,8 @@ const sessionId = computed(() => activeConversation.value?.id || 'default')
 const selectedZone = ref('')
 const selectedScalar = ref('')
 const displayMode = ref('surface')  // 'surface' | 'surface+edges' | 'wireframe'
+const opacity = ref(1.0)
+const colorPreset = ref('jet')
 const liveZones = ref([])
 const loading = ref(false)
 
@@ -91,16 +93,34 @@ watch(sessionId, () => { refreshZones() })
           <option value="wireframe">Wireframe</option>
         </select>
       </label>
+      <label>
+        Color:
+        <select v-model="colorPreset">
+          <option value="jet">Jet</option>
+          <option value="coolwarm">Cool-Warm</option>
+          <option value="rainbow">Rainbow</option>
+          <option value="viridis">Viridis</option>
+          <option value="blueRed">Blue-Red</option>
+          <option value="grayscale">Grayscale</option>
+        </select>
+      </label>
+      <label class="opacity-label">
+        Opacity:
+        <input type="range" v-model.number="opacity" min="0" max="1" step="0.05" class="opacity-slider" />
+        <span class="opacity-val">{{ Math.round(opacity * 100) }}%</span>
+      </label>
       <button class="refresh-btn" @click="refreshZones" :disabled="loading" title="刷新标量列表">
         {{ loading ? '...' : '↻' }}
       </button>
     </div>
     <VtkViewer
-      :key="`${sessionId}-${selectedZone}-${selectedScalar}-${displayMode}`"
+      :key="`${sessionId}-${selectedZone}-${selectedScalar}-${displayMode}-${colorPreset}`"
       :sessionId="sessionId"
       :zone="selectedZone"
       :scalarName="selectedScalar"
       :displayMode="displayMode"
+      :opacity="opacity"
+      :colorPreset="colorPreset"
     />
   </div>
 </template>
@@ -155,4 +175,7 @@ watch(sessionId, () => { refreshZones() })
 }
 .refresh-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 .refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.opacity-label { white-space: nowrap; }
+.opacity-slider { width: 70px; vertical-align: middle; accent-color: var(--accent); }
+.opacity-val { display: inline-block; width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
 </style>

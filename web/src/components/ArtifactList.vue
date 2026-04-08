@@ -8,6 +8,7 @@ const activeIndex = computed(() => activeConversation.value?.activeArtifactIndex
 
 function typeIcon(type) {
   if (type === 'numerical') return '#'
+  if (type === 'geometry') return '\u{1F4D0}'
   if (type === 'file') return '\u{1F4C4}'
   return '\u{1F4CB}'
 }

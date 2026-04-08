@@ -101,13 +101,17 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     writer = vtk.vtkXMLPolyDataWriter()
     writer.SetFileName(output_path)
     writer.SetInputData(output)
+    writer.SetDataModeToBinary()
+    writer.SetCompressorTypeToZLib()
     writer.Write()
 
+    result_id = f"contour_{id(output) % 100000:05d}"
     zone_label = zone_name or "all zones"
     return {
-        "type": "file",
+        "type": "geometry",
         "summary": f"Contour of {scalar_name} on {zone_label}: {n_points} points, {n_cells} cells. Range [{scalar_range[0]:.4g}, {scalar_range[1]:.4g}]. Saved to {output_path}",
         "data": {
+            "result_id": result_id,
             "output_file": output_path,
             "scalar": scalar_name,
             "range": [scalar_range[0], scalar_range[1]],
@@ -115,6 +119,7 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
             "n_cells": n_cells,
         },
         "output_files": [output_path],
+        "_vtk_output": output,
     }
 
 

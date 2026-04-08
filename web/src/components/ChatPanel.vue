@@ -9,6 +9,27 @@ const ws = useWebSocket()
 
 const inputText = ref('')
 const messageListRef = ref(null)
+const isDragging = ref(false)
+
+// Drag & drop: extract file path and auto-fill input
+function onDragOver(e) {
+  e.preventDefault()
+  isDragging.value = true
+}
+function onDragLeave() {
+  isDragging.value = false
+}
+function onDrop(e) {
+  e.preventDefault()
+  isDragging.value = false
+  const files = e.dataTransfer?.files
+  if (files && files.length > 0) {
+    const file = files[0]
+    // Electron/local: file.path gives full OS path
+    const filePath = file.path || file.name
+    inputText.value = `"${filePath}" 分析这个文件`
+  }
+}
 
 const title = computed(() => activeConversation.value?.title || 'ChatCFD')
 const messages = activeMessages
@@ -102,7 +123,7 @@ function sendMessageWithScroll() {
 </script>
 
 <template>
-  <div class="chat-panel">
+  <div class="chat-panel" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop" :class="{ 'drag-over': isDragging }">
     <div class="chat-header">
       <h2 class="truncate">{{ title }}</h2>
       <span class="badge">Phase 1</span>
@@ -256,5 +277,11 @@ function sendMessageWithScroll() {
 .send-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.chat-panel.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-primary));
 }
 </style>

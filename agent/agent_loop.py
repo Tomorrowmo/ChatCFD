@@ -11,31 +11,54 @@ from agent.skills import build_system_prompt
 
 
 def _make_artifact_title(tool_name: str, args: dict, result: dict) -> str:
-    """Generate a descriptive artifact title from tool name + args."""
+    """Generate a user-friendly artifact title from tool call context."""
     if tool_name == "calculate":
         method = args.get("method", "")
-        zone = args.get("zone_name", "")
-        # Method-specific titles
-        titles = {
-            "statistics": f"Statistics: {zone}" if zone else "Statistics",
-            "force_moment": f"Force & Moment: {zone}" if zone else "Force & Moment",
-            "velocity_gradient": "Velocity Gradient (Vorticity/Mach)",
-            "slice": f"Slice: {zone}" if zone else "Slice",
-            "streamline": f"Streamlines: {zone}" if zone else "Streamlines",
-            "contour": f"Contour: {zone}" if zone else "Contour",
-            "render": f"Render: {zone}" if zone else "Render",
-            "compare": "Compare",
-        }
-        return titles.get(method, f"{method}: {zone}" if zone else method)
+        params = args.get("params", {})
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except (json.JSONDecodeError, TypeError):
+                params = {}
+        data = result.get("data", {}) if isinstance(result, dict) else {}
+
+        if method == "slice":
+            normal = params.get("normal", [])
+            axis = {str([1,0,0]): "X", str([0,1,0]): "Y", str([0,0,1]): "Z"}.get(str(normal), "")
+            return f"Slice {axis}" if axis else "Slice"
+        if method == "clip":
+            return "Clip"
+        if method == "contour":
+            scalar = params.get("scalar", "")
+            value = params.get("value", "")
+            if scalar and value:
+                return f"Contour: {scalar}={value}"
+            return f"Contour: {scalar}" if scalar else "Contour"
+        if method == "streamline":
+            return "Streamlines"
+        if method == "render":
+            scalar = params.get("scalar", "")
+            return f"Render: {scalar}" if scalar else "Render"
+        if method == "statistics":
+            zone = args.get("zone_name", "")
+            return f"Statistics: {zone}" if zone else "Statistics"
+        if method == "force_moment":
+            zone = args.get("zone_name", "")
+            return f"Force & Moment: {zone}" if zone else "Force & Moment"
+        if method == "velocity_gradient":
+            return "Vorticity / Mach"
+        if method == "compare":
+            return "Compare"
+        return method
+
     if tool_name == "exportData":
         zone = args.get("zone", "")
-        fmt = args.get("format", "csv")
-        return f"Export: {zone}.{fmt}" if zone else f"Export ({fmt})"
+        return f"Export: {zone}" if zone else "Export"
     if tool_name == "listFiles":
         return "File List"
     if tool_name == "getMethodTemplate":
         return f"Methods: {args.get('method', 'all')}"
-    return f"{tool_name}"
+    return tool_name
 
 
 def run(session: AgentSession, mcp_client: MCPClient, harness: Harness,

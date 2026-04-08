@@ -75,9 +75,19 @@ class PostEngine:
             return {"error": f"Unknown method '{method}'. Available: {available}"}
         merged = {**entry["defaults"], **params}
         try:
-            return entry["execute"](state.post_data, merged, zone_name or "")
+            result = entry["execute"](state.post_data, merged, zone_name or "")
         except Exception as e:
             return {"error": f"Calculation failed: {e}"}
+
+        # Auto-store geometry results in session for HTTP API access
+        if isinstance(result, dict) and result.get("type") == "geometry":
+            vtk_output = result.pop("_vtk_output", None)
+            if vtk_output is not None:
+                result_id = result.get("data", {}).get("result_id")
+                if result_id:
+                    state.geometry_results[result_id] = vtk_output
+
+        return result
 
     def compare(self, session_id: str, source_a: str, source_b: str, **kwargs) -> dict:
         state = self.session_mgr.get(session_id)

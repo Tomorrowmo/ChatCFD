@@ -19,9 +19,21 @@ const containerRef = ref(null)
 const statusMsg = ref('')
 const scalarNames = ref([])
 const selectedScalar = ref('')
+const opacity = ref(1.0)
+const selectedPreset = ref('jet')
+
+const colorPresets = {
+  jet:         [[0,0,0,1], [0.25,0,1,1], [0.5,0,1,0], [0.75,1,1,0], [1,1,0,0]],
+  coolwarm:    [[0,0.231,0.298,0.753], [0.5,0.865,0.865,0.865], [1,0.706,0.016,0.150]],
+  rainbow:     [[0,0.278,0,0.714], [0.25,0,0,1], [0.5,0,1,0], [0.75,1,1,0], [1,1,0,0]],
+  viridis:     [[0,0.267,0.004,0.329], [0.25,0.282,0.141,0.457], [0.5,0.127,0.566,0.550], [0.75,0.544,0.774,0.247], [1,0.993,0.906,0.144]],
+  grayscale:   [[0,0,0,0], [1,1,1,1]],
+  blueRed:     [[0,0,0,1], [1,1,0,0]],
+}
 
 let fullScreenRenderer = null
 let loadedPolydata = null
+let currentActor = null
 
 onMounted(() => {
   initViewer()
@@ -38,14 +50,30 @@ onBeforeUnmount(() => {
 
 watch(() => props.path, () => { loadVtp() })
 watch(selectedScalar, () => { if (loadedPolydata) renderPolydata() })
+watch(selectedPreset, () => { if (loadedPolydata) renderPolydata() })
+watch(opacity, (val) => {
+  if (currentActor) {
+    currentActor.getProperty().setOpacity(val)
+    fullScreenRenderer?.getRenderWindow()?.render()
+  }
+})
 
 function initViewer() {
   if (!containerRef.value) return
   fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
     rootContainer: containerRef.value,
     containerStyle: { width: '100%', height: '100%' },
-    background: [0.15, 0.15, 0.18],
+    background: [0.92, 0.93, 0.95],
   })
+  // Lock the up vector so rotation doesn't flip the view
+  const camera = fullScreenRenderer.getRenderer().getActiveCamera()
+  camera.setViewUp(0, 1, 0)
+  // Prevent the camera from going upside down
+  const interactor = fullScreenRenderer.getRenderWindow().getInteractor()
+  const style = interactor.getInteractorStyle()
+  if (style && style.setMotionFactor) {
+    style.setMotionFactor(10)
+  }
 }
 
 function addOrientationAxes() {
@@ -124,12 +152,10 @@ function renderPolydata() {
     if (arr) {
       const [lo, hi] = arr.getRange()
       const ctf = vtkColorTransferFunction.newInstance()
-      const step = (hi - lo) / 4
-      ctf.addRGBPoint(lo, 0.0, 0.0, 1.0)
-      ctf.addRGBPoint(lo + step, 0.0, 1.0, 1.0)
-      ctf.addRGBPoint(lo + 2 * step, 0.0, 1.0, 0.0)
-      ctf.addRGBPoint(lo + 3 * step, 1.0, 1.0, 0.0)
-      ctf.addRGBPoint(hi, 1.0, 0.0, 0.0)
+      const preset = colorPresets[selectedPreset.value] || colorPresets.jet
+      for (const [t, r, g, b] of preset) {
+        ctf.addRGBPoint(lo + t * (hi - lo), r, g, b)
+      }
 
       if (useCellData) {
         cd.setActiveScalars(scalarInfo.name)
@@ -153,9 +179,11 @@ function renderPolydata() {
 
   const actor = vtkActor.newInstance()
   actor.setMapper(mapper)
+  actor.getProperty().setOpacity(opacity.value)
   if (!scalarInfo) {
     actor.getProperty().setColor(0.5, 0.7, 0.9)
   }
+  currentActor = actor
   renderer.addActor(actor)
   renderer.resetCamera()
   renderWindow.render()
@@ -175,9 +203,32 @@ function renderPolydata() {
           </option>
         </select>
       </label>
+      <label>
+        Color:
+        <select v-model="selectedPreset">
+          <option value="jet">Jet</option>
+          <option value="coolwarm">Cool-Warm</option>
+          <option value="rainbow">Rainbow</option>
+          <option value="viridis">Viridis</option>
+          <option value="blueRed">Blue-Red</option>
+          <option value="grayscale">Grayscale</option>
+        </select>
+      </label>
+      <label class="opacity-label">
+        Opacity:
+        <input type="range" v-model.number="opacity" min="0" max="1" step="0.05" class="opacity-slider" />
+        <span class="opacity-value">{{ Math.round(opacity * 100) }}%</span>
+      </label>
     </div>
     <div class="viewer-container" ref="containerRef">
       <div v-if="statusMsg" class="viewer-overlay">{{ statusMsg }}</div>
+      <div class="viewer-hints">
+        <span class="hint-item"><kbd>L</kbd> Rotate</span>
+        <span class="hint-sep">|</span>
+        <span class="hint-item"><kbd>M</kbd> Pan</span>
+        <span class="hint-sep">|</span>
+        <span class="hint-item"><kbd>&#x2191;&#x2193;</kbd> Zoom</span>
+      </div>
     </div>
   </div>
 </template>
@@ -213,6 +264,20 @@ function renderPolydata() {
   padding: 4px 8px;
   font-size: 12px;
 }
+.opacity-label {
+  white-space: nowrap;
+}
+.opacity-slider {
+  width: 80px;
+  vertical-align: middle;
+  accent-color: var(--accent);
+}
+.opacity-value {
+  display: inline-block;
+  width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .viewer-container {
   position: relative;
   width: 100%;
@@ -228,5 +293,41 @@ function renderPolydata() {
   color: var(--text-muted);
   font-size: 14px;
   pointer-events: none;
+}
+.viewer-hints {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  padding: 4px 10px;
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 2;
+  white-space: nowrap;
+}
+.hint-item {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.hint-item kbd {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: inherit;
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.4;
+}
+.hint-sep {
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 11px;
 }
 </style>

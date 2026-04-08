@@ -6,6 +6,7 @@ class SessionState:
         self.session_id = session_id
         self.post_data = None       # PostData instance, set after loadFile
         self.output_dir = None      # auto-set to file's directory
+        self.geometry_results = {}  # result_id -> vtkDataSet (geometry algorithm outputs)
         self.created_at = time.time()
         self.last_active = time.time()
 
