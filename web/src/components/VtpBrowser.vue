@@ -68,15 +68,6 @@ function initViewer() {
     containerStyle: { width: '100%', height: '100%' },
     background: [0.92, 0.93, 0.95],
   })
-  // Lock the up vector so rotation doesn't flip the view
-  const camera = fullScreenRenderer.getRenderer().getActiveCamera()
-  camera.setViewUp(0, 1, 0)
-  // Prevent the camera from going upside down
-  const interactor = fullScreenRenderer.getRenderWindow().getInteractor()
-  const style = interactor.getInteractorStyle()
-  if (style && style.setMotionFactor) {
-    style.setMotionFactor(10)
-  }
 }
 
 function addOrientationAxes() {
@@ -221,6 +212,10 @@ function renderPolydata() {
   if (!scalarInfo) {
     actor.getProperty().setColor(0.5, 0.7, 0.9)
   }
+  // Reduce lighting influence so scalar colors are more consistent across view angles
+  actor.getProperty().setAmbient(0.6)
+  actor.getProperty().setDiffuse(0.4)
+  actor.getProperty().setSpecular(0.0)
   currentActor = actor
   renderer.addActor(actor)
   renderer.resetCamera()

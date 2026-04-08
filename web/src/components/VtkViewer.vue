@@ -83,9 +83,6 @@ function initViewer() {
     containerStyle: { width: '100%', height: '100%' },
     background: [0.92, 0.93, 0.95],
   })
-  // Lock up vector to prevent flipping during rotation
-  const camera = fullScreenRenderer.getRenderer().getActiveCamera()
-  camera.setViewUp(0, 1, 0)
 }
 
 function addOrientationAxes() {

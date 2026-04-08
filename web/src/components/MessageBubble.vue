@@ -12,9 +12,16 @@ const props = defineProps({
 const { activeArtifacts, setActiveArtifact } = useChatStore()
 
 function onArtifactClick(artifactRef) {
-  const idx = activeArtifacts.value.findIndex((a) => a.id === artifactRef.id)
+  // Match artifact ids robustly: numeric vs string, or fallback to title
+  const idx = activeArtifacts.value.findIndex((a) => String(a.id) === String(artifactRef.id))
   if (idx >= 0) {
     setActiveArtifact(idx)
+    return
+  }
+  // Fallback: try matching by title
+  const tIdx = activeArtifacts.value.findIndex((a) => a.title === artifactRef.title)
+  if (tIdx >= 0) {
+    setActiveArtifact(tIdx)
   }
 }
 

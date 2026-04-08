@@ -2,6 +2,10 @@
 linux/
 *.tar
 *.tar.gz
+*.cgns
+*.plt
+*.vtm
+tests/data/
 
 # PRD 副本
 docs/chatcfd-prd copy.md
