@@ -73,7 +73,7 @@ function sendMessage() {
   if (filePath && hasLoadedFile()) {
     const fileName = filePath.split(/[/\\]/).pop()
     createConversation(fileName)
-    ws.connect()  // reconnect WebSocket for new conversation
+    // No need to reconnect WebSocket — it's shared, each message carries conversation_id
   }
 
   addMessage('user', text)
