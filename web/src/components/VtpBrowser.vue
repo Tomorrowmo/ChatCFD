@@ -13,6 +13,8 @@ import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/Orie
 
 const props = defineProps({
   path: { type: String, required: true },
+  sessionId: { type: String, default: '' },
+  baseZone: { type: String, default: '' },  // wall/tri zone name → load as background model
 })
 
 const containerRef = ref(null)
@@ -34,6 +36,7 @@ const colorPresets = {
 let fullScreenRenderer = null
 let loadedPolydata = null
 let currentActor = null
+let baseModelPolydata = null
 
 onMounted(() => {
   initViewer()
@@ -94,14 +97,35 @@ function addOrientationAxes() {
   }
 }
 
+async function loadBaseModel() {
+  if (!props.sessionId || !props.baseZone) return
+  try {
+    const url = `http://localhost:8000/api/surface/${props.sessionId}/${encodeURIComponent(props.baseZone)}`
+    const resp = await fetch(url)
+    if (!resp.ok) return
+    const buffer = await resp.arrayBuffer()
+    const reader = vtkXMLPolyDataReader.newInstance()
+    reader.parseAsArrayBuffer(buffer)
+    baseModelPolydata = reader.getOutputData(0)
+  } catch (err) {
+    console.warn('[VtpBrowser] Failed to load base model:', err.message)
+  }
+}
+
 async function loadVtp() {
   if (!fullScreenRenderer || !props.path) return
   statusMsg.value = 'Loading...'
 
   try {
+    // Load base model and result in parallel
     const safePath = props.path.split('/').map(s => encodeURIComponent(s)).join('/')
     const url = `http://localhost:8000/api/file/${safePath}`
-    const resp = await fetch(url)
+
+    const [resp] = await Promise.all([
+      fetch(url),
+      loadBaseModel(),
+    ])
+
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const buffer = await resp.arrayBuffer()
 
@@ -123,7 +147,9 @@ async function loadVtp() {
     }
     scalarNames.value = names
     if (names.length && !selectedScalar.value) {
-      selectedScalar.value = names[0].name
+      // Prefer VelocityMagnitude as default (most useful for streamlines)
+      const preferred = names.find(s => s.name === 'VelocityMagnitude')
+      selectedScalar.value = preferred ? preferred.name : names[0].name
     }
 
     renderPolydata()
@@ -138,6 +164,18 @@ function renderPolydata() {
   const renderer = fullScreenRenderer.getRenderer()
   const renderWindow = fullScreenRenderer.getRenderWindow()
   renderer.removeAllViewProps()
+
+  // Add base model (body surface) as light gray background
+  if (baseModelPolydata) {
+    const baseMapper = vtkMapper.newInstance()
+    baseMapper.setInputData(baseModelPolydata)
+    baseMapper.setScalarVisibility(false)
+    const baseActor = vtkActor.newInstance()
+    baseActor.setMapper(baseMapper)
+    baseActor.getProperty().setColor(0.82, 0.84, 0.86)
+    baseActor.getProperty().setOpacity(0.6)
+    renderer.addActor(baseActor)
+  }
 
   const mapper = vtkMapper.newInstance()
   mapper.setInputData(loadedPolydata)

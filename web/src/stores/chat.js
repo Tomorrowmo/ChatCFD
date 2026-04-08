@@ -269,6 +269,7 @@ export function useChatStore() {
       data: artifact.data || null,
       output_files: artifact.output_files || [],
       file_path: filePath,
+      source_file: artifact.source_file || '',
       created_at: new Date().toISOString(),
     }
     conv.artifacts.push(a)

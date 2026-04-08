@@ -19,7 +19,7 @@ DEFAULTS = {
     "velocity_x": "velocity_x",
     "velocity_y": "velocity_y",
     "velocity_z": "velocity_z",
-    "n_seeds": 80,
+    "n_seeds": 50,
     "seed_strategy": "auto",          # "auto" | "line" | "plane" | "inlet"
     "seed_start": None,               # [x,y,z] for line seed
     "seed_end": None,                 # [x,y,z] for line seed
@@ -29,7 +29,7 @@ DEFAULTS = {
     "max_length": None,               # None = auto
     "integration_direction": "forward",
     "tube_radius": None,              # None = auto
-    "tube_sides": 12,
+    "tube_sides": 6,
 }
 
 
@@ -237,49 +237,6 @@ def _find_body_bounds(multiblock):
     return None
 
 
-def _get_body_surface(multiblock):
-    """Extract body/wall surface as vtkPolyData for combined visualization."""
-    if multiblock is None:
-        return None
-    wall_keywords = ["wall", "body", "wing", "surface", "blade", "airfoil", "hull", "tri"]
-    n = multiblock.GetNumberOfBlocks()
-
-    # Find wall zone by name
-    for i in range(n):
-        meta = multiblock.GetMetaData(i)
-        if meta is None:
-            continue
-        if not meta.Has(vtk.vtkCompositeDataSet.NAME()):
-            continue
-        name = meta.Get(vtk.vtkCompositeDataSet.NAME()).lower()
-        if any(kw in name for kw in wall_keywords):
-            block = multiblock.GetBlock(i)
-            if block is not None and block.GetNumberOfPoints() > 0:
-                # Convert to polydata surface
-                geo = vtk.vtkGeometryFilter()
-                geo.SetInputData(block)
-                geo.Update()
-                return geo.GetOutput()
-
-    # Fallback: use smallest zone
-    smallest_block = None
-    smallest_pts = float('inf')
-    for i in range(n):
-        block = multiblock.GetBlock(i)
-        if block is None:
-            continue
-        npts = block.GetNumberOfPoints()
-        if 0 < npts < smallest_pts:
-            smallest_pts = npts
-            smallest_block = block
-    if smallest_block is not None and smallest_pts < multiblock.GetNumberOfPoints() * 0.5:
-        geo = vtk.vtkGeometryFilter()
-        geo.SetInputData(smallest_block)
-        geo.Update()
-        return geo.GetOutput()
-    return None
-
-
 def _find_inlet_boundary_seeds(data_with_vel, n_seeds, bounds):
     """Place seeds on the detected inlet face of the bounding box."""
     points = data_with_vel.GetPoints()
@@ -357,17 +314,24 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
         target = _merge_all_blocks(multiblock)
 
     # Build velocity vector field from 3 components
-    vx_name = str(params.get("velocity_x", "velocity_x"))
-    vy_name = str(params.get("velocity_y", "velocity_y"))
-    vz_name = str(params.get("velocity_z", "velocity_z"))
+    vx_param = str(params.get("velocity_x", "velocity_x"))
+    vy_param = str(params.get("velocity_y", "velocity_y"))
+    vz_param = str(params.get("velocity_z", "velocity_z"))
 
     ref_zone = zone_name or post_data.get_zones()[0]
     try:
-        post_data.get_scalar(ref_zone, vx_name)
-        post_data.get_scalar(ref_zone, vy_name)
-        post_data.get_scalar(ref_zone, vz_name)
+        post_data.get_scalar(ref_zone, vx_param)
+        post_data.get_scalar(ref_zone, vy_param)
+        post_data.get_scalar(ref_zone, vz_param)
     except ValueError as e:
         return {"error": f"Velocity field not found: {e}"}
+
+    # Resolve standard names to actual VTK array names
+    # (e.g., "velocity_x" -> "VelocityX" via physical mapping)
+    ref_block = post_data._get_block(ref_zone)
+    vx_name = post_data._resolve_name(ref_zone, vx_param, ref_block)
+    vy_name = post_data._resolve_name(ref_zone, vy_param, ref_block)
+    vz_name = post_data._resolve_name(ref_zone, vz_param, ref_block)
 
     # If scalars are in cell data, convert to point data first
     # (vtkArrayCalculator and vtkStreamTracer require point data)

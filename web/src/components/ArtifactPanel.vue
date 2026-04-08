@@ -7,7 +7,27 @@ import MeshBrowser from './MeshBrowser.vue'
 import VtpBrowser from './VtpBrowser.vue'
 
 const store = useChatStore()
-const { activeArtifacts, activeArtifact, setActiveArtifact, closeArtifactPanel } = store
+const { activeArtifacts, activeArtifact, setActiveArtifact, closeArtifactPanel, activeConversation } = store
+
+const sessionId = computed(() => activeConversation.value?.id || 'default')
+
+// Find the wall/surface zone from the loadFile artifact for base model display
+const baseZone = computed(() => {
+  const wallKeywords = ['wall', 'tri', 'surface', 'body']
+  for (const art of activeArtifacts.value) {
+    if (art.data?.zones) {
+      // Find smallest zone (likely body surface)
+      let best = null
+      for (const z of art.data.zones) {
+        const name = (z.name || '').toLowerCase()
+        if (wallKeywords.some(kw => name.includes(kw))) return z.name
+        if (!best || (z.point_count || 0) < (best.point_count || Infinity)) best = z
+      }
+      if (best && art.data.zones.length > 1) return best.name
+    }
+  }
+  return ''
+})
 
 // ── File-level tabs (deduplicated by file_path) ──
 const fileTabs = computed(() => {
@@ -24,26 +44,22 @@ const fileTabs = computed(() => {
     })
 })
 
-// Current active file path (from active artifact or first file tab)
+// Current active file path (from active artifact's source_file or data.file_path)
 const activeFilePath = computed(() => {
   const art = activeArtifact.value
-  if (!art) return null
-  // If it's a loadFile artifact
+  if (!art) return fileTabs.value[0]?.data?.file_path || null
+  // loadFile artifact
   if (art.data?.file_path) return art.data.file_path
-  // If it's a result artifact, find its parent file from output_files path
-  if (art.file_path) {
-    // Match result to file by checking if output_files are under the same directory
-    for (const ft of fileTabs.value) {
-      const fileDir = ft.data.file_path?.replace(/[^/]+$/, '')
-      if (fileDir && art.file_path.startsWith(fileDir)) return ft.data.file_path
-    }
-  }
-  // Fallback: use first file
+  // Result artifact with source_file tag
+  if (art.source_file) return art.source_file
+  // Fallback
   return fileTabs.value[0]?.data?.file_path || null
 })
 
-// ── Result tabs: all visual artifacts that aren't loadFile ──
+// ── Result tabs: visual artifacts belonging to the active file (matched by source_file) ──
 const resultTabs = computed(() => {
+  const fp = activeFilePath.value
+  console.log('[ArtifactPanel] activeFilePath:', fp, 'artifacts:', activeArtifacts.value.map(a => ({title: a.title, source_file: a.source_file})))
   return activeArtifacts.value
     .map((art, idx) => ({ ...art, _idx: idx }))
     .filter(art => {
@@ -51,7 +67,11 @@ const resultTabs = computed(() => {
       if (art.data && Array.isArray(art.data.zones) && art.data.zones.length > 0) return false
       // Include visual results: vtp, png
       if ((art.type === 'file' || art.type === 'geometry') && art.file_path) {
-        return art.file_path.endsWith('.vtp') || art.file_path.endsWith('.png') || art.file_path.endsWith('.jpg')
+        if (!(art.file_path.endsWith('.vtp') || art.file_path.endsWith('.png') || art.file_path.endsWith('.jpg'))) return false
+        // Match by source_file (exact match to active file)
+        // If source_file is empty/missing, hide it (don't show untagged results everywhere)
+        if (fp && (!art.source_file || art.source_file !== fp)) return false
+        return true
       }
       return false
     })
@@ -178,6 +198,8 @@ const viewerType = computed(() => {
       <VtpBrowser
         v-else-if="viewerType === 'vtk'"
         :path="activeArtifact.file_path"
+        :sessionId="sessionId"
+        :baseZone="baseZone"
       />
 
       <img

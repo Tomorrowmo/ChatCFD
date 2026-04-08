@@ -78,7 +78,8 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     os.makedirs(slice_dir, exist_ok=True)
 
     normal_str = f"{normal[0]}_{normal[1]}_{normal[2]}"
-    output_path = os.path.join(slice_dir, f"slice_n{normal_str}.vtp")
+    origin_str = f"{origin[0]:.4g}_{origin[1]:.4g}_{origin[2]:.4g}"
+    output_path = os.path.join(slice_dir, f"slice_n{normal_str}_o{origin_str}.vtp")
     output_path = os.path.normpath(output_path).replace("\\", "/")
 
     writer = vtk.vtkXMLPolyDataWriter()

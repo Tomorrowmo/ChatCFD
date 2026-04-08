@@ -24,7 +24,13 @@ def _make_artifact_title(tool_name: str, args: dict, result: dict) -> str:
 
         if method == "slice":
             normal = params.get("normal", [])
+            origin = params.get("origin", [])
             axis = {str([1,0,0]): "X", str([0,1,0]): "Y", str([0,0,1]): "Z"}.get(str(normal), "")
+            if axis and origin:
+                # Show position along the slice axis
+                axis_idx = {"X": 0, "Y": 1, "Z": 2}.get(axis, 0)
+                pos = origin[axis_idx] if axis_idx < len(origin) else ""
+                return f"Slice {axis}={pos}" if pos != "" else f"Slice {axis}"
             return f"Slice {axis}" if axis else "Slice"
         if method == "clip":
             return "Clip"
@@ -229,17 +235,19 @@ def run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
                     # Collect artifacts from tool results
                     if isinstance(parsed, dict) and "error" not in parsed:
                         if name == "loadFile":
+                            source_file = parsed.get("file_path", "")
+                            session.loaded_file_path = source_file
                             artifacts.append({
-                                "title": f"loadFile: {parsed.get('file_path', 'unknown').split('/')[-1]}",
+                                "title": f"loadFile: {source_file.split('/')[-1]}",
                                 "type": "numerical",
                                 "summary": f"{parsed.get('zone_count', 0)} zones, {parsed.get('total_cells', 0)} cells, {parsed.get('total_points', 0)} points",
                                 "data": parsed,
                                 "output_files": [],
+                                "source_file": source_file,
                             })
                             # Memory: inject related memories after loadFile
-                            file_path = args.get("file_path", "")
-                            if file_path:
-                                _inject_memory_after_load(session, mcp_pool, file_path)
+                            if source_file:
+                                _inject_memory_after_load(session, mcp_pool, source_file)
                         elif "summary" in parsed:
                             artifacts.append({
                                 "title": _make_artifact_title(name, args, parsed),
@@ -247,6 +255,7 @@ def run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
                                 "summary": parsed.get("summary", ""),
                                 "data": parsed.get("data"),
                                 "output_files": parsed.get("output_files", []),
+                                "source_file": getattr(session, 'loaded_file_path', ''),
                             })
                 except json.JSONDecodeError:
                     result = raw
@@ -391,18 +400,19 @@ def stream_run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
                     result = json.dumps(parsed, ensure_ascii=False)
                     if isinstance(parsed, dict) and "error" not in parsed:
                         if name == "loadFile":
+                            source_file = parsed.get("file_path", "")
+                            session.loaded_file_path = source_file
                             artifact = {
-                                "title": f"loadFile: {parsed.get('file_path', 'unknown').split('/')[-1]}",
+                                "title": f"loadFile: {source_file.split('/')[-1]}",
                                 "type": "numerical",
                                 "summary": f"{parsed.get('zone_count', 0)} zones, {parsed.get('total_cells', 0)} cells, {parsed.get('total_points', 0)} points",
                                 "data": parsed,
                                 "output_files": [],
+                                "source_file": source_file,
                             }
                             artifacts.append(artifact)
-                            # Memory: inject related memories after loadFile
-                            file_path = args.get("file_path", "")
-                            if file_path:
-                                _inject_memory_after_load(session, mcp_pool, file_path)
+                            if source_file:
+                                _inject_memory_after_load(session, mcp_pool, source_file)
                         elif "summary" in parsed:
                             artifact = {
                                 "title": _make_artifact_title(name, args, parsed),
@@ -410,6 +420,7 @@ def stream_run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
                                 "summary": parsed.get("summary", ""),
                                 "data": parsed.get("data"),
                                 "output_files": parsed.get("output_files", []),
+                                "source_file": getattr(session, 'loaded_file_path', ''),
                             }
                             artifacts.append(artifact)
                 except json.JSONDecodeError:

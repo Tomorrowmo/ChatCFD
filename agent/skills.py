@@ -43,8 +43,8 @@ RULES = """\
 2. **看云图 → loadFile 后告诉用户"点击右侧 artifact，Scalar 下拉框切换物理量"**
 3. **几何操作（slice/clip/streamline/contour）→ 必须用体网格 zone**（solid/Elem/volume），不要用表面 zone
 4. **流线 → 从 loadFile 返回的标量列表中找速度分量名（VelocityX/Y/Z 等），填入 params**
-5. **派生量（涡量/Mach/Cp）→ 先调 velocity_gradient 计算，再可视化**
-6. **涡量可视化 → 先 statistics 查范围，再 contour 提取等值面（阈值=mean+2×std）**
+5. **等值面 contour → scalar 必须是 loadFile 返回的已有标量**（如 Pressure、Mach、Temperature），不要用 Vorticity 等需要额外计算的量
+6. **涡量等值面 → 如果文件中没有 Vorticity 标量，改用 Mach 或 Pressure 等值面替代。不要反复重试 velocity_gradient + contour**
 7. **每次回复告诉用户下一步操作**（点击 artifact / 切换 Scalar / 调整参数）
 8. **回答简短直接**，不要重复工具返回的 JSON
 
