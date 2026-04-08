@@ -4,7 +4,8 @@ import MessageBubble from './MessageBubble.vue'
 import { useChatStore } from '../stores/chat.js'
 import { useWebSocket } from '../composables/useWebSocket.js'
 
-const { activeConversation, activeMessages, addMessage } = useChatStore()
+const store = useChatStore()
+const { activeConversation, activeMessages, addMessage, createConversation, activeArtifacts } = store
 const ws = useWebSocket()
 
 const inputText = ref('')
@@ -38,9 +39,42 @@ onMounted(() => {
   ws.connect()
 })
 
+// Detect file paths in text (e.g., "D:\path\file.cgns" or "D:/path/file.plt")
+const FILE_EXTS = ['.cgns', '.cga', '.plt', '.dat', '.case', '.vtm', '.vts', '.vtu', '.vtp']
+function detectFilePath(text) {
+  // Match quoted paths or bare paths with known extensions
+  const patterns = [
+    /"([^"]+\.\w+)"/,           // "D:\path\file.cgns"
+    /([A-Z]:[/\\][^\s"]+\.\w+)/i,  // D:\path\file.cgns (unquoted)
+  ]
+  for (const p of patterns) {
+    const m = text.match(p)
+    if (m) {
+      const path = m[1]
+      if (FILE_EXTS.some(ext => path.toLowerCase().endsWith(ext))) return path
+    }
+  }
+  return null
+}
+
+// Check if current conversation already has a loaded file
+function hasLoadedFile() {
+  return activeArtifacts.value.some(
+    art => art.data && Array.isArray(art.data.zones) && art.data.zones.length > 0
+  )
+}
+
 function sendMessage() {
   const text = inputText.value.trim()
   if (!text) return
+
+  // If user sends a new file and current conversation already has a file → new conversation
+  const filePath = detectFilePath(text)
+  if (filePath && hasLoadedFile()) {
+    const fileName = filePath.split(/[/\\]/).pop()
+    createConversation(fileName)
+    ws.connect()  // reconnect WebSocket for new conversation
+  }
 
   addMessage('user', text)
   ws.send(text)
