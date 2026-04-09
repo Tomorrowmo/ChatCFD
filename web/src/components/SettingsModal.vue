@@ -15,6 +15,7 @@ const MODELS = [
 
 const model = ref('openai/qwen3-max')
 const apiBase = ref('')
+const apiKey = ref('')
 const saving = ref(false)
 const statusMsg = ref('')
 
@@ -25,6 +26,7 @@ onMounted(() => {
       const s = JSON.parse(raw)
       model.value = s.model || model.value
       apiBase.value = s.api_base || ''
+      apiKey.value = s.api_key || ''
     }
   } catch (e) {
     console.warn('[Settings] load failed:', e)
@@ -37,12 +39,12 @@ async function onSave() {
   try {
     localStorage.setItem(
       SETTINGS_KEY,
-      JSON.stringify({ model: model.value, api_base: apiBase.value })
+      JSON.stringify({ model: model.value, api_base: apiBase.value, api_key: apiKey.value })
     )
     const resp = await fetch(`${AGENT_URL}/api/settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: model.value, api_base: apiBase.value }),
+      body: JSON.stringify({ model: model.value, api_base: apiBase.value, api_key: apiKey.value }),
     })
     if (resp.ok) {
       statusMsg.value = '已保存'
@@ -81,7 +83,11 @@ function onBackdropClick(e) {
           </select>
         </div>
         <div class="form-row">
-          <label>LLM API Base URL</label>
+          <label>API Key</label>
+          <input type="password" v-model="apiKey" placeholder="留空使用默认" />
+        </div>
+        <div class="form-row">
+          <label>API Base URL</label>
           <input type="text" v-model="apiBase" placeholder="留空使用默认" />
         </div>
         <div v-if="statusMsg" class="status">{{ statusMsg }}</div>

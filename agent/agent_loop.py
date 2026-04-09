@@ -178,12 +178,18 @@ def run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
     artifacts = []
 
     for _ in range(max_rounds):
-        response = litellm.completion(
-            model=model,
-            messages=[system_msg] + session.messages,
-            tools=tools if tools else None,
-            max_tokens=4096,
-        )
+        try:
+            response = litellm.completion(
+                model=model,
+                messages=[system_msg] + session.messages,
+                tools=tools if tools else None,
+                max_tokens=4096,
+            )
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "quota" in err_msg or "balance" in err_msg or "insufficient" in err_msg or "rate" in err_msg:
+                return {"content": "API 额度不足或已用完，请在设置中更换 API Key 或切换模型。", "artifacts": artifacts}
+            return {"content": f"LLM 调用失败: {e}", "artifacts": artifacts}
         msg = response.choices[0].message
         session.messages.append(msg.model_dump(exclude_none=True))
 
@@ -297,13 +303,21 @@ def stream_run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
 
     for _ in range(max_rounds):
         # Streaming LLM call
-        response = litellm.completion(
-            model=model,
-            messages=[system_msg] + session.messages,
-            tools=tools if tools else None,
-            max_tokens=4096,
-            stream=True,
-        )
+        try:
+            response = litellm.completion(
+                model=model,
+                messages=[system_msg] + session.messages,
+                tools=tools if tools else None,
+                max_tokens=4096,
+                stream=True,
+            )
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "quota" in err_msg or "balance" in err_msg or "insufficient" in err_msg or "rate" in err_msg:
+                yield {"type": "done", "content": "API 额度不足或已用完，请在设置中更换 API Key 或切换模型。", "artifacts": artifacts}
+            else:
+                yield {"type": "done", "content": f"LLM 调用失败: {e}", "artifacts": artifacts}
+            return
 
         # Accumulate streamed response
         full_content = ""

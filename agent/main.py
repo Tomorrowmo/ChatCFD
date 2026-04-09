@@ -134,6 +134,10 @@ async def update_settings(settings: dict):
         os.environ["OPENAI_API_BASE"] = settings["api_base"]
         os.environ["LLM_API_BASE"] = settings["api_base"]
         print(f"[Agent] API base updated")
+    if "api_key" in settings and settings["api_key"]:
+        os.environ["OPENAI_API_KEY"] = settings["api_key"]
+        os.environ["DASHSCOPE_API_KEY"] = settings["api_key"]
+        print(f"[Agent] API key updated")
     return {"status": "ok", "model": MODEL}
 
 
