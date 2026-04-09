@@ -47,6 +47,29 @@ async def websocket_endpoint(ws: WebSocket):
     conv_id = fallback_id
     print(f"[Agent] WebSocket connected (fallback={fallback_id})")
 
+    # Active generator task — can be cancelled
+    active_task = None
+
+    async def run_generator(session, conv_id, gen):
+        """Stream generator events to WebSocket."""
+        loop = asyncio.get_event_loop()
+        try:
+            while True:
+                if getattr(session, 'cancelled', False):
+                    gen.close()
+                    await ws.send_json({"type": "done", "content": "已停止。", "artifacts": []})
+                    return
+                event = await loop.run_in_executor(None, lambda: next(gen, None))
+                if event is None:
+                    return
+                await ws.send_json(event)
+                await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            gen.close()
+            await ws.send_json({"type": "done", "content": "已停止。", "artifacts": []})
+        except Exception as e:
+            await ws.send_json({"type": "done", "content": f"Error: {e}", "artifacts": []})
+
     try:
         while True:
             raw = await ws.receive_text()
@@ -58,41 +81,56 @@ async def websocket_endpoint(ws: WebSocket):
                 query = raw
                 conv_id = fallback_id
 
-            # Handle cancel signal
+            # Handle cancel signal — cancel the active task
             if query == "__cancel__":
                 session = pool.get(conv_id)
                 if session:
                     session.cancelled = True
-                await ws.send_json({"type": "done", "content": "", "artifacts": []})
+                if active_task and not active_task.done():
+                    active_task.cancel()
+                    active_task = None
                 continue
 
             session = pool.get_or_create(conv_id)
             session.messages.append({"role": "user", "content": query})
             session.cancelled = False
 
-            try:
-                # Run sync generator in thread executor so WS can flush between tokens
-                loop = asyncio.get_event_loop()
-                gen = agent_loop.stream_run(
-                    session, mcp_pool, harness, model=MODEL,
-                    mcp_session_id=conv_id,
+            # Cancel previous task if still running
+            if active_task and not active_task.done():
+                session.cancelled = True
+                active_task.cancel()
+
+            gen = agent_loop.stream_run(
+                session, mcp_pool, harness, model=MODEL,
+                mcp_session_id=conv_id,
+            )
+            active_task = asyncio.create_task(run_generator(session, conv_id, gen))
+
+            # Wait for generator to finish, but keep reading WebSocket for cancel signals
+            while not active_task.done():
+                # Race: wait for either next WS message or task completion
+                ws_receive = asyncio.ensure_future(ws.receive_text())
+                done, pending = await asyncio.wait(
+                    {ws_receive, active_task},
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-                while True:
-                    if getattr(session, 'cancelled', False):
-                        gen.close()
-                        await ws.send_json({"type": "done", "content": "已停止。", "artifacts": []})
+                if ws_receive in done:
+                    msg_raw = ws_receive.result()
+                    try:
+                        msg_data = json.loads(msg_raw)
+                        msg_content = msg_data.get("content", "")
+                    except json.JSONDecodeError:
+                        msg_content = msg_raw
+                    if msg_content == "__cancel__":
+                        session.cancelled = True
+                        active_task.cancel()
+                        try:
+                            await active_task
+                        except asyncio.CancelledError:
+                            pass
                         break
-                    event = await loop.run_in_executor(None, lambda: next(gen, None))
-                    if event is None:
-                        break
-                    await ws.send_json(event)
-                    await asyncio.sleep(0)  # yield control to flush
-            except Exception as e:
-                await ws.send_json({
-                    "type": "done",
-                    "content": f"Error: {e}",
-                    "artifacts": [],
-                })
+                else:
+                    ws_receive.cancel()
 
             insight_log.log_query(
                 LOG_DIR, conv_id, query,
