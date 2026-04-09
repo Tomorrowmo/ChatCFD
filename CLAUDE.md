@@ -58,8 +58,7 @@ chatcfd/
 │   │   └── statistics.py              # 标量统计 min/max/mean（numpy）
 │   └── config/
 │       └── physical_mapping.json      # 物理量名称映射表
-├── web/                               # Vue.js + VTK.js 前端
-└── legacy/                            # 旧代码参考（不运行）
+└── web/                               # Vue.js + VTK.js 前端
 ```
 
 ## 关键设计决策
@@ -74,21 +73,6 @@ chatcfd/
 8. **AI 约束三层**: Harness(硬) > Skill(中) > Prompt(软)
 9. **前端双通道**: 对话走 Agent → MCP，渲染数据前端直连 HTTP API，不经过 LLM
 10. **前端 Artifact 侧边栏 + VTK.js 3D 渲染**
-
-## legacy/ 说明
-
-legacy/ 下是旧项目的代码，不直接运行，仅作参考。迁移算法时参考这些文件：
-- `legacy/PostDrive/PostDrive.py` — 文件读取驱动，封装 vtkRomtekIODriver
-- `legacy/PostDrive/PostIntegral.py` — 力矩积分 Python 封装
-- `legacy/PostDrive/PostVelocityGradient.py` — 速度梯度计算封装
-- `legacy/PostDrive/ForceMomentIntegralStruct.py` — 力矩积分参数结构（将改为 DEFAULTS dict）
-- `legacy/PostDrive/VelocityGradientStruct.py` — 速度梯度参数结构（将改为 DEFAULTS dict）
-- `legacy/PostDrive/MultiBlockDataSetAnalyse.py` — 数据集分析
-- `legacy/quick_tools.py` — 旧的 MCP 工具，参考缓存逻辑和 _ensure_loaded
-- `legacy/tool.py` — 旧的工具函数
-- `legacy/post_integral.py` — 力矩积分独立脚本
-- `legacy/agent.py` — 旧的 Agent Loop + MCP Client 连接模式
-- `legacy/VtkWidget.py` — VTK 渲染窗口（前端参考）
 
 ## 编码规范
 
