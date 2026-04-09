@@ -11,20 +11,21 @@ const { activeArtifacts, activeArtifact, setActiveArtifact, closeArtifactPanel, 
 
 const sessionId = computed(() => activeConversation.value?.id || 'default')
 
-// Find the wall/surface zone from the loadFile artifact for base model display
+// Find the wall/surface zone from the loadFile artifact matching the active file
 const baseZone = computed(() => {
+  const fp = activeFilePath.value
   const wallKeywords = ['wall', 'tri', 'surface', 'body']
   for (const art of activeArtifacts.value) {
-    if (art.data?.zones) {
-      // Find smallest zone (likely body surface)
-      let best = null
-      for (const z of art.data.zones) {
-        const name = (z.name || '').toLowerCase()
-        if (wallKeywords.some(kw => name.includes(kw))) return z.name
-        if (!best || (z.point_count || 0) < (best.point_count || Infinity)) best = z
-      }
-      if (best && art.data.zones.length > 1) return best.name
+    if (!art.data?.zones) continue
+    // Only match loadFile artifacts for the active file
+    if (fp && art.data.file_path && art.data.file_path !== fp) continue
+    let best = null
+    for (const z of art.data.zones) {
+      const name = (z.name || '').toLowerCase()
+      if (wallKeywords.some(kw => name.includes(kw))) return z.name
+      if (!best || (z.point_count || 0) < (best.point_count || Infinity)) best = z
     }
+    if (best && art.data.zones.length > 1) return best.name
   }
   return ''
 })
@@ -193,6 +194,7 @@ const viewerType = computed(() => {
       <MeshBrowser
         v-else-if="viewerType === 'mesh'"
         :data="activeArtifact.data"
+        :sourceFile="activeArtifact.data?.file_path || ''"
       />
 
       <VtpBrowser
@@ -200,6 +202,7 @@ const viewerType = computed(() => {
         :path="activeArtifact.file_path"
         :sessionId="sessionId"
         :baseZone="baseZone"
+        :sourceFile="activeArtifact.source_file || ''"
       />
 
       <img

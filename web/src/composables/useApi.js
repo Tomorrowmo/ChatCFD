@@ -1,14 +1,16 @@
 const BASE_URL = 'http://localhost:8000'
 
 export function useApi() {
-  async function getMesh(sessionId, zone) {
-    const resp = await fetch(`${BASE_URL}/api/mesh/${sessionId}/${zone}`)
+  async function getMesh(sessionId, zone, file = '') {
+    const fileParam = file ? `?file=${encodeURIComponent(file)}` : ''
+    const resp = await fetch(`${BASE_URL}/api/mesh/${sessionId}/${zone}${fileParam}`)
     if (!resp.ok) throw new Error(`getMesh failed: ${resp.status}`)
     return await resp.arrayBuffer()
   }
 
-  async function getScalar(sessionId, zone, name) {
-    const resp = await fetch(`${BASE_URL}/api/scalar/${sessionId}/${zone}/${name}`)
+  async function getScalar(sessionId, zone, name, file = '') {
+    const fileParam = file ? `?file=${encodeURIComponent(file)}` : ''
+    const resp = await fetch(`${BASE_URL}/api/scalar/${sessionId}/${zone}/${name}${fileParam}`)
     if (!resp.ok) throw new Error(`getScalar failed: ${resp.status}`)
     return await resp.arrayBuffer()
   }

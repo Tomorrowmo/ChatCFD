@@ -4,11 +4,36 @@ import time
 class SessionState:
     def __init__(self, session_id: str):
         self.session_id = session_id
-        self.post_data = None       # PostData instance, set after loadFile
+        self._post_data_map = {}    # file_path -> PostData
+        self._active_file = None    # current active file path
         self.output_dir = None      # auto-set to file's directory
         self.geometry_results = {}  # result_id -> vtkDataSet (geometry algorithm outputs)
         self.created_at = time.time()
         self.last_active = time.time()
+
+    @property
+    def post_data(self):
+        """Active file's PostData (backward compatible)."""
+        if self._active_file:
+            return self._post_data_map.get(self._active_file)
+        return None
+
+    @post_data.setter
+    def post_data(self, value):
+        if value is None:
+            self._active_file = None
+        else:
+            self._active_file = value.file_path
+            self._post_data_map[value.file_path] = value
+
+    def get_post_data(self, file_path=None):
+        """Get PostData for a specific file, or active file if None."""
+        if file_path:
+            # Normalize for lookup
+            import os
+            normalized = os.path.normpath(file_path).replace("\\", "/")
+            return self._post_data_map.get(normalized)
+        return self.post_data
 
     def touch(self):
         self.last_active = time.time()
@@ -32,8 +57,9 @@ class SessionManager:
 
     def destroy(self, session_id: str):
         state = self._sessions.pop(session_id, None)
-        if state and state.post_data:
-            state.post_data = None
+        if state:
+            state._post_data_map.clear()
+            state._active_file = None
 
     def cleanup_expired(self):
         now = time.time()

@@ -73,7 +73,8 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
         return {"error": "Slice produced no data. Check origin and normal parameters."}
 
     # Save as VTP
-    output_dir = os.path.dirname(post_data.file_path)
+    file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
+    output_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
     slice_dir = os.path.join(output_dir, "Slice")
     os.makedirs(slice_dir, exist_ok=True)
 

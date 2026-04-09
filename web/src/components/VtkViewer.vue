@@ -16,6 +16,7 @@ const props = defineProps({
   zone: { type: String, default: '' },
   scalarName: { type: String, default: '' },
   path: { type: String, default: '' },
+  sourceFile: { type: String, default: '' },
   displayMode: { type: String, default: 'surface' },
   opacity: { type: Number, default: 1.0 },
   colorPreset: { type: String, default: 'jet' },
@@ -127,7 +128,8 @@ async function loadData() {
   statusMsg.value = 'Loading 3D mesh...'
 
   try {
-    const url = `http://localhost:8000/api/surface/${props.sessionId}/${encodeURIComponent(props.zone)}`
+    const fileParam = props.sourceFile ? `?file=${encodeURIComponent(props.sourceFile)}` : ''
+    const url = `http://localhost:8000/api/surface/${props.sessionId}/${encodeURIComponent(props.zone)}${fileParam}`
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const vtpBuffer = await resp.arrayBuffer()

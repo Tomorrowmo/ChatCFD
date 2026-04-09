@@ -64,7 +64,8 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     result_id = f"clip_{id(output) % 100000:05d}"
 
     # Save VTP
-    output_dir = os.path.dirname(post_data.file_path)
+    file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
+    output_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
     clip_dir = os.path.join(output_dir, "Clip")
     os.makedirs(clip_dir, exist_ok=True)
 

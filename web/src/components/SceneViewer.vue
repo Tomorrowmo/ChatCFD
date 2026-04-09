@@ -84,8 +84,9 @@ function buildRainbowLut(lo, hi) {
 
 async function fetchVtpBuffer(layer) {
   if (layer.type === 'zone') {
-    const { sessionId, zone } = layer.source
-    const url = `http://localhost:8000/api/surface/${sessionId}/${encodeURIComponent(zone)}`
+    const { sessionId, zone, sourceFile } = layer.source
+    const fileParam = sourceFile ? `?file=${encodeURIComponent(sourceFile)}` : ''
+    const url = `http://localhost:8000/api/surface/${sessionId}/${encodeURIComponent(zone)}${fileParam}`
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching zone ${zone}`)
     return resp.arrayBuffer()
@@ -271,7 +272,7 @@ onMounted(async () => {
     <div class="viewer-container" ref="containerRef">
       <div v-if="statusMsg" class="viewer-overlay">{{ statusMsg }}</div>
     </div>
-    <LayerPanel :meshData="meshData" />
+    <LayerPanel :meshData="meshData" :sourceFile="meshData?.file_path || ''" />
   </div>
 </template>
 

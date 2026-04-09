@@ -5,6 +5,7 @@ import { useChatStore } from '../stores/chat.js'
 
 const props = defineProps({
   data: Object, // loadFile summary (initial data, refreshed from API)
+  sourceFile: { type: String, default: '' }, // source file path for multi-file sessions
 })
 
 const { activeConversation } = useChatStore()
@@ -24,11 +25,13 @@ const currentZoneScalars = computed(() => {
   return z?.scalars || []
 })
 
+const fileParam = computed(() => props.sourceFile ? `?file=${encodeURIComponent(props.sourceFile)}` : '')
+
 // Fetch latest zone/scalar info from backend (picks up post-calculation changes)
 async function refreshZones() {
   try {
     loading.value = true
-    const resp = await fetch(`http://localhost:8000/api/zones/${sessionId.value}`)
+    const resp = await fetch(`http://localhost:8000/api/zones/${sessionId.value}${fileParam.value}`)
     if (resp.ok) {
       const data = await resp.json()
       if (data.zones) {
@@ -42,9 +45,9 @@ async function refreshZones() {
   }
 }
 
-function autoSelect() {
+function autoSelect(forceReset = false) {
   const z = zones.value
-  if (z.length && (!selectedZone.value || !z.find(x => x.name === selectedZone.value))) {
+  if (z.length && (forceReset || !selectedZone.value || !z.find(x => x.name === selectedZone.value))) {
     selectedZone.value = z[0].name
     const firstScalar = z[0].scalars?.[0]
     selectedScalar.value = firstScalar?.raw_name || ''
@@ -53,6 +56,13 @@ function autoSelect() {
 
 watch(() => props.data, () => { autoSelect() }, { immediate: true })
 watch(liveZones, () => { autoSelect() })
+
+// When switching files, clear stale liveZones and re-fetch
+watch(() => props.sourceFile, () => {
+  liveZones.value = []
+  autoSelect(true)
+  refreshZones()
+})
 
 watch(selectedZone, () => {
   const scalars = currentZoneScalars.value
@@ -114,8 +124,9 @@ watch(sessionId, () => { refreshZones() })
       </button>
     </div>
     <VtkViewer
-      :key="`${sessionId}-${selectedZone}-${selectedScalar}-${displayMode}-${colorPreset}`"
+      :key="`${sessionId}-${sourceFile}-${selectedZone}-${selectedScalar}-${displayMode}-${colorPreset}`"
       :sessionId="sessionId"
+      :sourceFile="sourceFile"
       :zone="selectedZone"
       :scalarName="selectedScalar"
       :displayMode="displayMode"

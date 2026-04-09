@@ -57,7 +57,8 @@ class PostEngine:
         if state is None:
             state = self.session_mgr.create(session_id)
         state.post_data = post_data
-        state.output_dir = os.path.dirname(file_path)
+        file_stem = os.path.splitext(os.path.basename(file_path))[0]
+        state.output_dir = os.path.join(os.path.dirname(file_path), file_stem)
         summary = post_data.get_summary()
         archive_info = AnalysisArchive.check_consistency(file_path)
         summary["archive"] = archive_info

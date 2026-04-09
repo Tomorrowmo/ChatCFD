@@ -132,7 +132,8 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     n_cells = output.GetNumberOfCells()
 
     # --- 8. Save as VTP ---
-    output_dir = os.path.dirname(post_data.file_path)
+    file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
+    output_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
     contour_dir = os.path.join(output_dir, "Contour")
     os.makedirs(contour_dir, exist_ok=True)
 

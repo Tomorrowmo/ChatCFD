@@ -1,17 +1,20 @@
 """HTTP endpoints: zone info + surface extraction for VTK.js frontend."""
 import json
 import vtk
-from fastapi import Response
+from fastapi import Response, Query
 
 
 def setup(app, engine):
     @app.get("/api/zones/{session_id}")
-    async def get_zones(session_id: str):
+    async def get_zones(session_id: str, file: str = Query(None)):
         """Return live zone/scalar info from current session (reflects post-calculation changes)."""
         state = engine.session_mgr.get(session_id)
-        if state is None or state.post_data is None:
+        if state is None:
             return Response(content=b"[]", media_type="application/json", status_code=404)
-        summary = state.post_data.get_summary()
+        post_data = state.get_post_data(file)
+        if post_data is None:
+            return Response(content=b"[]", media_type="application/json", status_code=404)
+        summary = post_data.get_summary()
         return Response(
             content=json.dumps(summary, ensure_ascii=False).encode(),
             media_type="application/json",
@@ -19,14 +22,17 @@ def setup(app, engine):
         )
 
     @app.get("/api/surface/{session_id}/{zone}")
-    async def get_surface(session_id: str, zone: str):
+    async def get_surface(session_id: str, zone: str, file: str = Query(None)):
         state = engine.session_mgr.get(session_id)
-        if state is None or state.post_data is None:
+        if state is None:
+            return Response(content=b"", status_code=404)
+        post_data = state.get_post_data(file)
+        if post_data is None:
             return Response(content=b"", status_code=404)
 
         try:
             # Find zone block by name in the multiblock dataset
-            multiblock = state.post_data.get_vtk_data()
+            multiblock = post_data.get_vtk_data()
             target = None
             for i in range(multiblock.GetNumberOfBlocks()):
                 meta = multiblock.GetMetaData(i)

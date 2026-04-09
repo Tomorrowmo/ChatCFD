@@ -15,6 +15,7 @@ const props = defineProps({
   path: { type: String, required: true },
   sessionId: { type: String, default: '' },
   baseZone: { type: String, default: '' },  // wall/tri zone name → load as background model
+  sourceFile: { type: String, default: '' }, // source file path for multi-file sessions
 })
 
 const containerRef = ref(null)
@@ -95,7 +96,8 @@ function addOrientationAxes() {
 async function loadBaseModel() {
   if (!props.sessionId || !props.baseZone) return
   try {
-    const url = `http://localhost:8000/api/surface/${props.sessionId}/${encodeURIComponent(props.baseZone)}`
+    const fileParam = props.sourceFile ? `?file=${encodeURIComponent(props.sourceFile)}` : ''
+    const url = `http://localhost:8000/api/surface/${props.sessionId}/${encodeURIComponent(props.baseZone)}${fileParam}`
     const resp = await fetch(url)
     if (!resp.ok) return
     const buffer = await resp.arrayBuffer()
