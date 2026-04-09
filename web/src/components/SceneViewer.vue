@@ -46,6 +46,10 @@ function initViewer() {
     containerStyle: { width: '100%', height: '100%' },
     background: [0.92, 0.93, 0.95],
   })
+  // Prevent browser auto-scroll on middle mouse so VTK.js pan works
+  containerRef.value.addEventListener('mousedown', (e) => {
+    if (e.button === 1) e.preventDefault()
+  })
   addOrientationAxes()
 }
 
