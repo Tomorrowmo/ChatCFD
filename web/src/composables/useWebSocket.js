@@ -105,7 +105,11 @@ function createMockWebSocket() {
     // no-op in mock mode
   }
 
-  return { send, connect, disconnect }
+  function cancel() {
+    // no-op in mock mode
+  }
+
+  return { send, connect, disconnect, cancel }
 }
 
 function createRealWebSocket() {
@@ -201,7 +205,14 @@ function createRealWebSocket() {
     }
   }
 
-  return { send, connect, disconnect }
+  function cancel() {
+    if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+      const conv_id = activeConversation.value?.id || 'default'
+      ws.value.send(JSON.stringify({ content: '__cancel__', conversation_id: conv_id }))
+    }
+  }
+
+  return { send, connect, disconnect, cancel }
 }
 
 export function useWebSocket() {

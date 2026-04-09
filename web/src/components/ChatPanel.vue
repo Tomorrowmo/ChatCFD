@@ -12,6 +12,14 @@ const inputText = ref('')
 const messageListRef = ref(null)
 const isDragging = ref(false)
 
+// Track if agent is currently processing
+const isProcessing = computed(() => {
+  const msgs = activeMessages.value
+  if (!msgs.length) return false
+  const last = msgs[msgs.length - 1]
+  return last.role === 'assistant' && last._streaming
+})
+
 // Drag & drop: extract file path and auto-fill input
 function onDragOver(e) {
   e.preventDefault()
@@ -154,6 +162,10 @@ function sendMessageWithScroll() {
   isAtBottom.value = true
   nextTick(() => scrollToBottom())
 }
+
+function stopProcessing() {
+  ws.cancel()
+}
 </script>
 
 <template>
@@ -186,7 +198,10 @@ function sendMessageWithScroll() {
         rows="2"
         @keydown="onKeydown"
       ></textarea>
-      <button class="send-btn" @click="sendMessageWithScroll" :disabled="!inputText.trim()">
+      <button v-if="isProcessing" class="stop-btn" @click="stopProcessing">
+        Stop
+      </button>
+      <button v-else class="send-btn" @click="sendMessageWithScroll" :disabled="!inputText.trim()">
         Send
       </button>
     </div>
@@ -311,6 +326,19 @@ function sendMessageWithScroll() {
 .send-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.stop-btn {
+  padding: 10px 20px;
+  background: #e74c3c;
+  color: #fff;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: background 0.15s;
+  align-self: flex-end;
+}
+.stop-btn:hover {
+  background: #c0392b;
 }
 
 .chat-panel.drag-over {

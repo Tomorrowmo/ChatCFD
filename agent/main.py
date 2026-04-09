@@ -58,8 +58,17 @@ async def websocket_endpoint(ws: WebSocket):
                 query = raw
                 conv_id = fallback_id
 
+            # Handle cancel signal
+            if query == "__cancel__":
+                session = pool.get(conv_id)
+                if session:
+                    session.cancelled = True
+                await ws.send_json({"type": "done", "content": "", "artifacts": []})
+                continue
+
             session = pool.get_or_create(conv_id)
             session.messages.append({"role": "user", "content": query})
+            session.cancelled = False
 
             try:
                 # Run sync generator in thread executor so WS can flush between tokens
@@ -69,6 +78,10 @@ async def websocket_endpoint(ws: WebSocket):
                     mcp_session_id=conv_id,
                 )
                 while True:
+                    if getattr(session, 'cancelled', False):
+                        gen.close()
+                        await ws.send_json({"type": "done", "content": "已停止。", "artifacts": []})
+                        break
                     event = await loop.run_in_executor(None, lambda: next(gen, None))
                     if event is None:
                         break
