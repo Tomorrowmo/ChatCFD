@@ -1,32 +1,39 @@
-"""Iso-surface extraction using RomtekContourPlaneFilter (Romtek C++ engine).
+"""Axis-aligned slice extraction using Romtek SliceFilter (Romtek C++ engine).
 
-Replaces the old vtkContourFilter-based contour.py (now _contour.py).
-Uses the Romtek C++ ContourPlaneFilter via vtk Python bindings directly.
+Replaces the old vtkCutter-based slice.py (now _slice.py).
+Supports X/Y/Z axis-aligned slicing with configurable number of planes.
 """
 import os
 
 import vtk
 
-NAME = "contour"
-DESCRIPTION = "Extract iso-surface (contour) at specified scalar value. Outputs a .vtp file for 3D viewing."
+NAME = "slice"
+DESCRIPTION = "Extract axis-aligned slice planes colored by a scalar. Outputs a .vtp file for 3D viewing."
 DEFAULTS = {
-    "scalar": None,      # required: scalar name for iso-surface extraction
-    "value": None,       # [min, max] range. None = auto full range
-    "n_contours": 10,    # number of iso-surfaces
+    "scalar": None,      # required: scalar for coloring the slice
+    "direction": 0,      # 0=X, 1=Y, 2=Z
+    "n_slices": 3,       # number of slice planes
+    "start": None,       # start position along axis (None = auto from bounds)
+    "end": None,         # end position along axis (None = auto from bounds)
 }
 
 
 def execute(post_data, params: dict, zone_name: str) -> dict:
     multiblock = post_data.get_vtk_data()
 
-    # --- 1. Validate scalar ---
+    # --- 1. Validate params ---
     scalar_name = params.get("scalar")
     if not scalar_name:
         return {"error": "Parameter 'scalar' is required. E.g. scalar='Pressure'"}
 
+    direction = int(params.get("direction", 0))
+    if direction not in (0, 1, 2):
+        return {"error": f"Invalid direction={direction}. Must be 0 (X), 1 (Y), or 2 (Z)."}
+
     zones = post_data.get_zones()
     if not zones:
         return {"error": "No zones in dataset."}
+
     ref_zone = zone_name if zone_name and zone_name in zones else zones[0]
     ref_block = post_data._get_block(ref_zone)
     try:
@@ -35,8 +42,6 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
         return {"error": str(e)}
 
     # --- 2. Zone filtering ---
-    # Romtek filter merges all blocks internally. If zone_name specified,
-    # build a single-block multiblock containing only that zone.
     if zone_name:
         try:
             target_block = post_data._get_block(zone_name)
@@ -64,7 +69,6 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
             c2p.SetInputData(block)
             c2p.Update()
             converted_mb.SetBlock(i, c2p.GetOutput())
-            # Preserve metadata
             src_meta = multiblock.GetMetaData(i)
             if src_meta and src_meta.Has(vtk.vtkCompositeDataSet.NAME()):
                 converted_mb.GetMetaData(i).Set(
@@ -73,8 +77,27 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
                 )
         multiblock = converted_mb
 
-    # --- 4. Compute global scalar range ---
-    global_min, global_max = _get_global_range(multiblock, resolved_scalar)
+    # --- 4. Auto start/end from bounds ---
+    bounds = _get_global_bounds(multiblock)
+    # direction 0=X -> bounds indices (0,1), 1=Y -> (2,3), 2=Z -> (4,5)
+    axis_min = bounds[direction * 2]
+    axis_max = bounds[direction * 2 + 1]
+
+    start = params.get("start")
+    end = params.get("end")
+    if start is None:
+        start = axis_min
+    if end is None:
+        end = axis_max
+    start = float(start)
+    end = float(end)
+
+    print(f"[rtslice] bounds={bounds}, direction={direction}, start={start}, end={end}")
+    print(f"[rtslice] multiblock blocks={multiblock.GetNumberOfBlocks()}, resolved_scalar={resolved_scalar}")
+    for i in range(multiblock.GetNumberOfBlocks()):
+        blk = multiblock.GetBlock(i)
+        if blk:
+            print(f"[rtslice]   block[{i}]: type={blk.GetClassName()}, points={blk.GetNumberOfPoints()}, cells={blk.GetNumberOfCells()}")
 
     # --- 5. Build RomtekPostDataSet (data bridge) ---
     try:
@@ -86,37 +109,29 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
         return {"error": f"Failed to build RomtekPostDataSet: {e}"}
 
     # --- 6. Configure and run filter ---
-    n_contours = int(params.get("n_contours", 10))
-    value = params.get("value")
+    n_slices = int(params.get("n_slices", 3))
 
-    if value is not None:
-        if isinstance(value, (list, tuple)) and len(value) == 2:
-            iso_min, iso_max = float(value[0]), float(value[1])
-        else:
-            v = float(value)
-            iso_min, iso_max = v, v
-    else:
-        iso_min, iso_max = global_min, global_max
+    print(f"[rtslice] Running SliceFilter: n_slices={n_slices}, scalar={resolved_scalar}, dir={direction}, range=[{start}, {end}]")
 
     try:
-        filt = vtk.ContourPlaneFilter()
+        filt = vtk.SliceFilter()
         filt.SetInput(rpds)
-        filt.SetIsoGeneNum(n_contours)
-        filt.SetIsoVar(resolved_scalar)
+        filt.SetSliceGeneNum(n_slices)
         filt.SetScalar(resolved_scalar)
-        filt.SetIsoMinMax(iso_min, iso_max)
+        filt.SetSliceDir(direction)
+        filt.SetStartEndPos(start, end)
         filt.Update()
         result_mb = filt.GetOutput()
     except Exception as e:
-        return {"error": f"ContourPlaneFilter failed: {e}"}
+        return {"error": f"SliceFilter failed: {e}"}
 
     # --- 7. Merge all non-empty output blocks ---
-    # ContourPlaneFilter may return multiple blocks; merge into one polydata.
+    # SliceFilter returns one block per slice plane; merge them into one polydata.
     if result_mb is None or result_mb.GetNumberOfBlocks() == 0:
         return {
             "error": (
-                f"Contour produced no data for scalar '{scalar_name}' "
-                f"in range [{iso_min:.4g}, {iso_max:.4g}]"
+                f"Slice produced no data for scalar '{scalar_name}' "
+                f"direction={'XYZ'[direction]} range [{start:.4g}, {end:.4g}]"
             )
         }
 
@@ -131,8 +146,8 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     if valid_count == 0:
         return {
             "error": (
-                f"Contour produced empty result for scalar '{scalar_name}'. "
-                f"Range is [{global_min:.4g}, {global_max:.4g}]"
+                f"Slice produced empty result for scalar '{scalar_name}'. "
+                f"direction={'XYZ'[direction]} range [{start:.4g}, {end:.4g}]"
             )
         }
 
@@ -143,14 +158,17 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     n_cells = output.GetNumberOfCells()
 
     # --- 8. Save as VTP ---
+    dir_label = "XYZ"[direction]
     file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
     output_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
-    contour_dir = os.path.join(output_dir, "Contour")
-    os.makedirs(contour_dir, exist_ok=True)
+    slice_dir = os.path.join(output_dir, "Slice")
+    os.makedirs(slice_dir, exist_ok=True)
 
-    value_str = f"{iso_min:.4g}_{iso_max:.4g}" if value else f"auto{n_contours}"
     output_path = os.path.normpath(
-        os.path.join(contour_dir, f"contour_{scalar_name}_{value_str}.vtp")
+        os.path.join(
+            slice_dir,
+            f"slice_{dir_label}_{start:.4g}_{end:.4g}_n{n_slices}.vtp",
+        )
     ).replace("\\", "/")
 
     writer = vtk.vtkXMLPolyDataWriter()
@@ -160,22 +178,24 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     writer.SetCompressorTypeToZLib()
     writer.Write()
 
-    # --- 9. Return (same format as old contour) ---
-    result_id = f"contour_{id(output) % 100000:05d}"
+    # --- 9. Return ---
+    result_id = f"slice_{id(output) % 100000:05d}"
     zone_label = zone_name or "all zones"
     return {
         "type": "geometry",
         "summary": (
-            f"Contour of {scalar_name} on {zone_label}: "
+            f"Slice of {zone_label} along {dir_label}-axis: "
+            f"{n_slices} planes in [{start:.4g}, {end:.4g}], "
             f"{n_points} points, {n_cells} cells. "
-            f"Range [{global_min:.4g}, {global_max:.4g}]. "
-            f"Saved to {output_path}"
+            f"Colored by {scalar_name}. Saved to {output_path}"
         ),
         "data": {
             "result_id": result_id,
             "output_file": output_path,
             "scalar": scalar_name,
-            "range": [global_min, global_max],
+            "direction": dir_label,
+            "n_slices": n_slices,
+            "range": [start, end],
             "n_points": n_points,
             "n_cells": n_cells,
         },
@@ -184,22 +204,21 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     }
 
 
-def _get_global_range(multiblock, scalar_name):
-    """Compute global min/max of scalar across all blocks."""
-    global_min = float("inf")
-    global_max = float("-inf")
+def _get_global_bounds(multiblock):
+    """Compute global bounding box across all blocks."""
+    xmin = ymin = zmin = float("inf")
+    xmax = ymax = zmax = float("-inf")
     for i in range(multiblock.GetNumberOfBlocks()):
         block = multiblock.GetBlock(i)
-        if block is None:
+        if block is None or block.GetNumberOfPoints() == 0:
             continue
-        arr = block.GetPointData().GetArray(scalar_name)
-        if arr is None:
-            arr = block.GetCellData().GetArray(scalar_name)
-        if arr is None:
-            continue
-        lo, hi = arr.GetRange()
-        global_min = min(global_min, lo)
-        global_max = max(global_max, hi)
-    if global_min == float("inf"):
-        return 0.0, 0.0
-    return global_min, global_max
+        b = block.GetBounds()
+        xmin = min(xmin, b[0])
+        xmax = max(xmax, b[1])
+        ymin = min(ymin, b[2])
+        ymax = max(ymax, b[3])
+        zmin = min(zmin, b[4])
+        zmax = max(zmax, b[5])
+    if xmin == float("inf"):
+        return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    return (xmin, xmax, ymin, ymax, zmin, zmax)

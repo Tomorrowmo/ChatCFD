@@ -34,7 +34,8 @@ const zones = computed(() =>
 
 const currentZoneScalars = computed(() => {
   const z = zones.value.find(x => x.name === newZone.value)
-  return z?.scalars || []
+  const scalars = z?.scalars || []
+  return [...scalars].sort((a, b) => (a.display_name || a.raw_name).localeCompare(b.display_name || b.raw_name))
 })
 
 async function refreshZones() {

@@ -28,10 +28,12 @@ TOOLS = """\
 | statistics | 标量统计 min/max/mean | 任意 zone |
 | force_moment | 力/力矩/升阻力系数 | 表面 zone（wall/tri） |
 | velocity_gradient | 涡量/Cp/Mach/声速 | 体网格 zone（solid/Elem） |
-| slice | 切片截面 | 体网格 zone |
+| slice | 轴对齐切片截面（direction=0/1/2 即 X/Y/Z） | 体网格 zone |
 | clip | 裁剪（保留一半） | 体网格 zone |
-| streamline | 流线 | 体网格 zone |
+| streamline | 流线（需速度分量名） | 体网格 zone |
 | contour | 等值面 | 体网格 zone |
+| vector_field | 矢量场箭头（需速度分量名） | 体网格 zone |
+| volume_render | 体渲染（标量场 3D 可视化） | 体网格 zone |
 | render | 离屏渲染 PNG | 任意 zone |
 | compare | 两区域标量对比 | — |"""
 
@@ -41,12 +43,14 @@ RULES = """\
 ### 必须做
 1. **用户提到文件 → 必须调 loadFile**，不要只输出文字
 2. **看云图 → loadFile 后告诉用户"点击右侧 artifact，Scalar 下拉框切换物理量"**
-3. **几何操作（slice/clip/streamline/contour）→ 必须用体网格 zone**（solid/Elem/volume），不要用表面 zone
-4. **流线 → 从 loadFile 返回的标量列表中找速度分量名（VelocityX/Y/Z 等），填入 params**
+3. **几何操作（slice/clip/streamline/contour/vector_field/volume_render）→ 必须用体网格 zone**（solid/Elem/volume），不要用表面 zone
+4. **流线/矢量场 → 从 loadFile 返回的标量列表中找速度分量名（VelocityX/Y/Z 等），填入 velocity_x/velocity_y/velocity_z**
 5. **等值面 contour → scalar 必须是 loadFile 返回的已有标量**（如 Pressure、Mach、Temperature），不要用 Vorticity 等需要额外计算的量
 6. **涡量等值面 → 如果文件中没有 Vorticity 标量，改用 Mach 或 Pressure 等值面替代。不要反复重试 velocity_gradient + contour**
-7. **每次回复告诉用户下一步操作**（点击 artifact / 切换 Scalar / 调整参数）
-8. **回答简短直接**，不要重复工具返回的 JSON
+7. **切片 slice → direction 参数：0=X, 1=Y, 2=Z。start/end 不传则自动取包围盒范围**
+8. **体渲染/矢量场 → box_min/box_max 不传则自动取包围盒，resolution 控制网格精度**
+9. **每次回复告诉用户下一步操作**（点击 artifact / 切换 Scalar / 调整参数）
+10. **回答简短直接**，不要重复工具返回的 JSON
 
 ### 禁止做
 1. **禁止编造工具调用** — 不要在文字中写 `loadFile("...")` 而不实际调用

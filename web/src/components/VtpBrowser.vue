@@ -142,6 +142,7 @@ async function loadVtp() {
       const a = cd.getArrayByIndex(i)
       if (a.getNumberOfComponents() === 1) names.push({ name: a.getName(), loc: 'cell' })
     }
+    names.sort((a, b) => a.name.localeCompare(b.name))
     scalarNames.value = names
     if (names.length && !selectedScalar.value) {
       // Prefer VelocityMagnitude as default (most useful for streamlines)

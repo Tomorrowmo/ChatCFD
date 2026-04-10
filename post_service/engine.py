@@ -65,20 +65,32 @@ class PostEngine:
         return summary
 
     def calculate(self, session_id: str, method: str, params: dict, zone_name: str) -> dict:
+        import traceback
+        print(f"[Engine.calculate] method={method}, params={params}, zone_name={zone_name}, session_id={session_id}")
         state = self.session_mgr.get(session_id)
         if state is None:
+            print(f"[Engine.calculate] ERROR: Session '{session_id}' not found")
             return {"error": "Session not found. Please load a file first."}
         if state.post_data is None:
+            print(f"[Engine.calculate] ERROR: No file loaded in session '{session_id}'")
             return {"error": "No file loaded. Please use loadFile first."}
         entry = self.registry.get(method)
         if entry is None:
             available = [m["name"] for m in self.registry.list_methods()]
+            print(f"[Engine.calculate] ERROR: Unknown method '{method}'. Available: {available}")
             return {"error": f"Unknown method '{method}'. Available: {available}"}
         merged = {**entry["defaults"], **params}
+        print(f"[Engine.calculate] merged params: {merged}")
         try:
             result = entry["execute"](state.post_data, merged, zone_name or "")
         except Exception as e:
+            traceback.print_exc()
             return {"error": f"Calculation failed: {e}"}
+
+        if isinstance(result, dict) and result.get("error"):
+            print(f"[Engine.calculate] Algorithm returned error: {result['error']}")
+        else:
+            print(f"[Engine.calculate] Success: type={result.get('type')}, summary={str(result.get('summary', ''))[:100]}")
 
         # Auto-store geometry results in session for HTTP API access
         if isinstance(result, dict) and result.get("type") == "geometry":

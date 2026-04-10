@@ -22,7 +22,8 @@ const loading = ref(false)
 const zones = computed(() => liveZones.value.length ? liveZones.value : (props.data?.zones || []))
 const currentZoneScalars = computed(() => {
   const z = zones.value.find((x) => x.name === selectedZone.value)
-  return z?.scalars || []
+  const scalars = z?.scalars || []
+  return [...scalars].sort((a, b) => (a.display_name || a.raw_name).localeCompare(b.display_name || b.raw_name))
 })
 
 const fileParam = computed(() => props.sourceFile ? `?file=${encodeURIComponent(props.sourceFile)}` : '')

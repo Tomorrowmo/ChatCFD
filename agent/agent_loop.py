@@ -23,15 +23,12 @@ def _make_artifact_title(tool_name: str, args: dict, result: dict) -> str:
         data = result.get("data", {}) if isinstance(result, dict) else {}
 
         if method == "slice":
-            normal = params.get("normal", [])
-            origin = params.get("origin", [])
-            axis = {str([1,0,0]): "X", str([0,1,0]): "Y", str([0,0,1]): "Z"}.get(str(normal), "")
-            if axis and origin:
-                # Show position along the slice axis
-                axis_idx = {"X": 0, "Y": 1, "Z": 2}.get(axis, 0)
-                pos = origin[axis_idx] if axis_idx < len(origin) else ""
-                return f"Slice {axis}={pos}" if pos != "" else f"Slice {axis}"
-            return f"Slice {axis}" if axis else "Slice"
+            direction = params.get("direction", 0)
+            axis = {0: "X", 1: "Y", 2: "Z"}.get(int(direction), "")
+            n_slices = params.get("n_slices", "")
+            if axis:
+                return f"Slice {axis} x{n_slices}" if n_slices else f"Slice {axis}"
+            return "Slice"
         if method == "clip":
             return "Clip"
         if method == "contour":
@@ -42,6 +39,11 @@ def _make_artifact_title(tool_name: str, args: dict, result: dict) -> str:
             return f"Contour: {scalar}" if scalar else "Contour"
         if method == "streamline":
             return "Streamlines"
+        if method == "vector_field":
+            return "Vector Field"
+        if method == "volume_render":
+            scalar = params.get("scalar", "")
+            return f"Volume Render: {scalar}" if scalar else "Volume Render"
         if method == "render":
             scalar = params.get("scalar", "")
             return f"Render: {scalar}" if scalar else "Render"

@@ -1,18 +1,19 @@
-"""Iso-surface extraction using RomtekContourPlaneFilter (Romtek C++ engine).
+"""Volume rendering using Romtek VolumeRenderFilter (Romtek C++ engine).
 
-Replaces the old vtkContourFilter-based contour.py (now _contour.py).
-Uses the Romtek C++ ContourPlaneFilter via vtk Python bindings directly.
+Resamples the volumetric data onto a uniform grid within a bounding box
+and produces a renderable polydata output colored by the specified scalar.
 """
 import os
 
 import vtk
 
-NAME = "contour"
-DESCRIPTION = "Extract iso-surface (contour) at specified scalar value. Outputs a .vtp file for 3D viewing."
+NAME = "volume_render"
+DESCRIPTION = "Generate volume rendering of a scalar field on a uniform grid. Outputs a .vtp file for 3D viewing."
 DEFAULTS = {
-    "scalar": None,      # required: scalar name for iso-surface extraction
-    "value": None,       # [min, max] range. None = auto full range
-    "n_contours": 10,    # number of iso-surfaces
+    "scalar": None,                # required: scalar for volume rendering
+    "box_min": None,               # [x, y, z] min corner (None = auto from bounds)
+    "box_max": None,               # [x, y, z] max corner (None = auto from bounds)
+    "resolution": [128, 128, 128], # [nx, ny, nz] grid resolution
 }
 
 
@@ -27,6 +28,7 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     zones = post_data.get_zones()
     if not zones:
         return {"error": "No zones in dataset."}
+
     ref_zone = zone_name if zone_name and zone_name in zones else zones[0]
     ref_block = post_data._get_block(ref_zone)
     try:
@@ -35,8 +37,6 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
         return {"error": str(e)}
 
     # --- 2. Zone filtering ---
-    # Romtek filter merges all blocks internally. If zone_name specified,
-    # build a single-block multiblock containing only that zone.
     if zone_name:
         try:
             target_block = post_data._get_block(zone_name)
@@ -64,7 +64,6 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
             c2p.SetInputData(block)
             c2p.Update()
             converted_mb.SetBlock(i, c2p.GetOutput())
-            # Preserve metadata
             src_meta = multiblock.GetMetaData(i)
             if src_meta and src_meta.Has(vtk.vtkCompositeDataSet.NAME()):
                 converted_mb.GetMetaData(i).Set(
@@ -73,8 +72,20 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
                 )
         multiblock = converted_mb
 
-    # --- 4. Compute global scalar range ---
-    global_min, global_max = _get_global_range(multiblock, resolved_scalar)
+    # --- 4. Auto box range from bounds ---
+    bounds = _get_global_bounds(multiblock)
+
+    box_min = params.get("box_min")
+    box_max = params.get("box_max")
+    if box_min is None:
+        box_min = [bounds[0], bounds[2], bounds[4]]
+    if box_max is None:
+        box_max = [bounds[1], bounds[3], bounds[5]]
+    box_min = [float(v) for v in box_min]
+    box_max = [float(v) for v in box_max]
+
+    resolution = params.get("resolution", [128, 128, 128])
+    nx, ny, nz = int(resolution[0]), int(resolution[1]), int(resolution[2])
 
     # --- 5. Build RomtekPostDataSet (data bridge) ---
     try:
@@ -86,58 +97,24 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
         return {"error": f"Failed to build RomtekPostDataSet: {e}"}
 
     # --- 6. Configure and run filter ---
-    n_contours = int(params.get("n_contours", 10))
-    value = params.get("value")
-
-    if value is not None:
-        if isinstance(value, (list, tuple)) and len(value) == 2:
-            iso_min, iso_max = float(value[0]), float(value[1])
-        else:
-            v = float(value)
-            iso_min, iso_max = v, v
-    else:
-        iso_min, iso_max = global_min, global_max
-
     try:
-        filt = vtk.ContourPlaneFilter()
+        filt = vtk.VolumeRenderFilter()
         filt.SetInput(rpds)
-        filt.SetIsoGeneNum(n_contours)
-        filt.SetIsoVar(resolved_scalar)
+        filt.SetBoxRange(box_min, box_max)
+        filt.SetSizeXYZ(nx, ny, nz)
         filt.SetScalar(resolved_scalar)
-        filt.SetIsoMinMax(iso_min, iso_max)
         filt.Update()
         result_mb = filt.GetOutput()
     except Exception as e:
-        return {"error": f"ContourPlaneFilter failed: {e}"}
+        return {"error": f"VolumeRenderFilter failed: {e}"}
 
-    # --- 7. Merge all non-empty output blocks ---
-    # ContourPlaneFilter may return multiple blocks; merge into one polydata.
+    # --- 7. Extract output polydata (block 0 = frame 0) ---
     if result_mb is None or result_mb.GetNumberOfBlocks() == 0:
-        return {
-            "error": (
-                f"Contour produced no data for scalar '{scalar_name}' "
-                f"in range [{iso_min:.4g}, {iso_max:.4g}]"
-            )
-        }
+        return {"error": "Volume render produced no data. Check box range and scalar field."}
 
-    append = vtk.vtkAppendPolyData()
-    valid_count = 0
-    for i in range(result_mb.GetNumberOfBlocks()):
-        blk = result_mb.GetBlock(i)
-        if blk and blk.GetNumberOfPoints() > 0:
-            append.AddInputData(blk)
-            valid_count += 1
-
-    if valid_count == 0:
-        return {
-            "error": (
-                f"Contour produced empty result for scalar '{scalar_name}'. "
-                f"Range is [{global_min:.4g}, {global_max:.4g}]"
-            )
-        }
-
-    append.Update()
-    output = append.GetOutput()
+    output = result_mb.GetBlock(0)
+    if output is None or output.GetNumberOfPoints() == 0:
+        return {"error": "Volume render produced empty result. Check box range covers the domain."}
 
     n_points = output.GetNumberOfPoints()
     n_cells = output.GetNumberOfCells()
@@ -145,12 +122,11 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     # --- 8. Save as VTP ---
     file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
     output_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
-    contour_dir = os.path.join(output_dir, "Contour")
-    os.makedirs(contour_dir, exist_ok=True)
+    vr_dir = os.path.join(output_dir, "VolumeRender")
+    os.makedirs(vr_dir, exist_ok=True)
 
-    value_str = f"{iso_min:.4g}_{iso_max:.4g}" if value else f"auto{n_contours}"
     output_path = os.path.normpath(
-        os.path.join(contour_dir, f"contour_{scalar_name}_{value_str}.vtp")
+        os.path.join(vr_dir, f"volrender_{scalar_name}_{nx}x{ny}x{nz}.vtp")
     ).replace("\\", "/")
 
     writer = vtk.vtkXMLPolyDataWriter()
@@ -160,22 +136,23 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     writer.SetCompressorTypeToZLib()
     writer.Write()
 
-    # --- 9. Return (same format as old contour) ---
-    result_id = f"contour_{id(output) % 100000:05d}"
+    # --- 9. Return ---
+    result_id = f"volrender_{id(output) % 100000:05d}"
     zone_label = zone_name or "all zones"
     return {
         "type": "geometry",
         "summary": (
-            f"Contour of {scalar_name} on {zone_label}: "
-            f"{n_points} points, {n_cells} cells. "
-            f"Range [{global_min:.4g}, {global_max:.4g}]. "
+            f"Volume render of {scalar_name} on {zone_label}: "
+            f"{nx}x{ny}x{nz} grid, {n_points} points. "
             f"Saved to {output_path}"
         ),
         "data": {
             "result_id": result_id,
             "output_file": output_path,
             "scalar": scalar_name,
-            "range": [global_min, global_max],
+            "resolution": [nx, ny, nz],
+            "box_min": box_min,
+            "box_max": box_max,
             "n_points": n_points,
             "n_cells": n_cells,
         },
@@ -184,22 +161,21 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     }
 
 
-def _get_global_range(multiblock, scalar_name):
-    """Compute global min/max of scalar across all blocks."""
-    global_min = float("inf")
-    global_max = float("-inf")
+def _get_global_bounds(multiblock):
+    """Compute global bounding box across all blocks."""
+    xmin = ymin = zmin = float("inf")
+    xmax = ymax = zmax = float("-inf")
     for i in range(multiblock.GetNumberOfBlocks()):
         block = multiblock.GetBlock(i)
-        if block is None:
+        if block is None or block.GetNumberOfPoints() == 0:
             continue
-        arr = block.GetPointData().GetArray(scalar_name)
-        if arr is None:
-            arr = block.GetCellData().GetArray(scalar_name)
-        if arr is None:
-            continue
-        lo, hi = arr.GetRange()
-        global_min = min(global_min, lo)
-        global_max = max(global_max, hi)
-    if global_min == float("inf"):
-        return 0.0, 0.0
-    return global_min, global_max
+        b = block.GetBounds()
+        xmin = min(xmin, b[0])
+        xmax = max(xmax, b[1])
+        ymin = min(ymin, b[2])
+        ymax = max(ymax, b[3])
+        zmin = min(zmin, b[4])
+        zmax = max(zmax, b[5])
+    if xmin == float("inf"):
+        return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    return (xmin, xmax, ymin, ymax, zmin, zmax)
