@@ -132,8 +132,16 @@ function addOrientationAxes() {
 }
 
 async function precomputeGlobalRanges() {
-  /** Load all frame files in background, collect min/max for each scalar. */
+  /** Load all frame files in background, collect min/max for each scalar + vector magnitude. */
   const ranges = {}
+  function mergeRange(name, lo, hi) {
+    if (name in ranges) {
+      ranges[name][0] = Math.min(ranges[name][0], lo)
+      ranges[name][1] = Math.max(ranges[name][1], hi)
+    } else {
+      ranges[name] = [lo, hi]
+    }
+  }
   for (const filePath of props.frameFiles) {
     try {
       const safePath = filePath.split('/').map(s => encodeURIComponent(s)).join('/')
@@ -142,19 +150,62 @@ async function precomputeGlobalRanges() {
       const buffer = await resp.arrayBuffer()
       const reader = vtkXMLPolyDataReader.newInstance()
       reader.parseAsArrayBuffer(buffer)
-      const pd = reader.getOutputData(0)
-      for (const dataObj of [pd.getPointData(), pd.getCellData()]) {
+      const polydata = reader.getOutputData(0)
+      const pointData = polydata.getPointData()
+      const cellData = polydata.getCellData()
+
+      // 1-component scalars
+      for (const dataObj of [pointData, cellData]) {
         for (let i = 0; i < dataObj.getNumberOfArrays(); i++) {
           const arr = dataObj.getArrayByIndex(i)
           if (arr.getNumberOfComponents() !== 1) continue
-          const name = arr.getName()
           const [lo, hi] = arr.getRange()
-          if (name in ranges) {
-            ranges[name][0] = Math.min(ranges[name][0], lo)
-            ranges[name][1] = Math.max(ranges[name][1], hi)
-          } else {
-            ranges[name] = [lo, hi]
+          mergeRange(arr.getName(), lo, hi)
+        }
+      }
+
+      // 3-component point vectors → compute magnitude range
+      for (let i = 0; i < pointData.getNumberOfArrays(); i++) {
+        const arr = pointData.getArrayByIndex(i)
+        if (arr.getNumberOfComponents() !== 3) continue
+        const data = arr.getData()
+        const n = arr.getNumberOfTuples()
+        let lo = Infinity, hi = -Infinity
+        for (let j = 0; j < n; j++) {
+          const k = j * 3
+          const mag = Math.sqrt(data[k] ** 2 + data[k + 1] ** 2 + data[k + 2] ** 2)
+          if (mag < lo) lo = mag
+          if (mag > hi) hi = mag
+        }
+        if (lo <= hi) mergeRange(arr.getName() + '_Magnitude', lo, hi)
+      }
+
+      // Component triplets (_x/_y/_z) → synthesize magnitude range
+      const pt1C = []
+      for (let i = 0; i < pointData.getNumberOfArrays(); i++) {
+        const a = pointData.getArrayByIndex(i)
+        if (a.getNumberOfComponents() === 1) pt1C.push(a.getName())
+      }
+      const seen = new Set()
+      for (const [sx, sy, sz] of [['_x', '_y', '_z'], ['X', 'Y', 'Z']]) {
+        for (const name of pt1C) {
+          if (!name.endsWith(sx)) continue
+          const base = name.slice(0, -sx.length)
+          if (!pt1C.includes(base + sy) || !pt1C.includes(base + sz)) continue
+          const vecName = base || 'Velocity'
+          if (seen.has(vecName)) continue
+          seen.add(vecName)
+          const dX = pointData.getArrayByName(name).getData()
+          const dY = pointData.getArrayByName(base + sy).getData()
+          const dZ = pointData.getArrayByName(base + sz).getData()
+          const n = dX.length
+          let lo = Infinity, hi = -Infinity
+          for (let j = 0; j < n; j++) {
+            const mag = Math.sqrt(dX[j] ** 2 + dY[j] ** 2 + dZ[j] ** 2)
+            if (mag < lo) lo = mag
+            if (mag > hi) hi = mag
           }
+          if (lo <= hi) mergeRange(vecName + '_Magnitude', lo, hi)
         }
       }
     } catch { /* skip failed frames */ }
@@ -432,7 +483,9 @@ function renderVectorField() {
   const magName = selectedVector.value + '_Magnitude'
   const magArr = loadedPolydata.getPointData().getArrayByName(magName)
   if (magArr) {
-    let [lo, hi] = magArr.getRange()
+    const perFrame = magArr.getRange()
+    const globalR = globalScalarRanges.value[magName]
+    let [lo, hi] = globalR || perFrame
     if (lo >= hi) hi = lo + 1  // guard degenerate range
     const ctf = vtkColorTransferFunction.newInstance()
     const preset = colorPresets[selectedPreset.value] || colorPresets.jet

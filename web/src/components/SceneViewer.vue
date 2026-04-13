@@ -19,12 +19,14 @@ const props = defineProps({
   meshData: { type: Object, default: null },
 })
 
-const { activeSceneLayers } = useChatStore()
+const { activeSceneLayers, activeConversation } = useChatStore()
 
 const containerRef = ref(null)
 const statusMsg = ref('')
 const currentFrame = ref(0)
 const timeControlsRef = ref(null)
+const zoneScalarRanges = ref({})   // {zone: {scalar: [min, max]}} from backend
+const fileLayerRanges = ref({})    // {layerId: {scalar: [min, max]}} precomputed
 
 const frameCount = computed(() => props.meshData?.frame_count || 1)
 const timeLabels = computed(() => props.meshData?.time_labels || [])
@@ -36,7 +38,10 @@ const layerMap = new Map()
 
 onMounted(() => {
   initViewer()
+  fetchZoneScalarRanges()
 })
+
+watch(() => props.meshData, () => { fetchZoneScalarRanges() })
 
 onBeforeUnmount(() => {
   layerMap.clear()
@@ -78,6 +83,65 @@ function addOrientationAxes() {
   }
 }
 
+async function fetchZoneScalarRanges() {
+  if (!props.meshData || frameCount.value <= 1) return
+  const sid = activeConversation.value?.id || 'default'
+  const sf = props.meshData?.file_path || ''
+  try {
+    const params = sf ? `?file=${encodeURIComponent(sf)}` : ''
+    const resp = await fetch(`http://localhost:8000/api/zones/${sid}${params}`)
+    if (!resp.ok) return
+    const data = await resp.json()
+    if (data.scalar_ranges) {
+      zoneScalarRanges.value = data.scalar_ranges
+    } else if (data.frame_count > 1) {
+      setTimeout(fetchZoneScalarRanges, 3000)
+    }
+  } catch { /* ignore */ }
+}
+
+async function precomputeFileLayerRanges(layer) {
+  const frameFiles = layer.source?.outputFilesByFrame
+  if (!frameFiles || frameFiles.length <= 1) return
+  const ranges = {}
+  for (const filePath of frameFiles) {
+    try {
+      const safePath = filePath.split('/').map(s => encodeURIComponent(s)).join('/')
+      const resp = await fetch(`http://localhost:8000/api/file/${safePath}`)
+      if (!resp.ok) continue
+      const buffer = await resp.arrayBuffer()
+      const reader = vtkXMLPolyDataReader.newInstance()
+      reader.parseAsArrayBuffer(buffer)
+      const pd = reader.getOutputData(0)
+      for (const dataObj of [pd.getPointData(), pd.getCellData()]) {
+        for (let i = 0; i < dataObj.getNumberOfArrays(); i++) {
+          const arr = dataObj.getArrayByIndex(i)
+          if (arr.getNumberOfComponents() !== 1) continue
+          const name = arr.getName()
+          const [lo, hi] = arr.getRange()
+          if (name in ranges) {
+            ranges[name][0] = Math.min(ranges[name][0], lo)
+            ranges[name][1] = Math.max(ranges[name][1], hi)
+          } else {
+            ranges[name] = [lo, hi]
+          }
+        }
+      }
+    } catch { /* skip */ }
+  }
+  fileLayerRanges.value = { ...fileLayerRanges.value, [layer.id]: ranges }
+}
+
+function getLayerGlobalRange(layer, scalarName) {
+  if (!scalarName) return null
+  if (layer.type === 'zone') {
+    const zr = zoneScalarRanges.value[layer.source.zone]
+    return zr?.[scalarName] || null
+  }
+  const fr = fileLayerRanges.value[layer.id]
+  return fr?.[scalarName] || null
+}
+
 function buildRainbowLut(lo, hi) {
   const ctf = vtkColorTransferFunction.newInstance()
   const step = (hi - lo) / 4
@@ -115,7 +179,7 @@ async function fetchVtpBuffer(layer, frame = 0) {
   }
 }
 
-function createActorFromPolydata(polydata, scalarName) {
+function createActorFromPolydata(polydata, scalarName, globalRange = null) {
   const mapper = vtkMapper.newInstance()
   mapper.setInputData(polydata)
 
@@ -147,7 +211,8 @@ function createActorFromPolydata(polydata, scalarName) {
       useCellData = true
     }
     if (arr && arr.getNumberOfComponents() === 1) {
-      const [lo, hi] = arr.getRange()
+      const perFrame = arr.getRange()
+      const [lo, hi] = globalRange || perFrame
       const ctf = buildRainbowLut(lo, hi)
 
       if (useCellData) {
@@ -175,12 +240,17 @@ function createActorFromPolydata(polydata, scalarName) {
     actor.getProperty().setColor(0.7, 0.7, 0.75)
   }
 
-  return { actor, scalarBarActor, mapper }
+  return { actor, scalarBarActor, mapper, resolvedScalar: targetScalar }
 }
 
 async function addLayerToScene(layer, frame = 0) {
   if (!fullScreenRenderer) return
   if (layerMap.has(layer.id)) return // already loaded
+
+  // Kick off background precompute for file layers with multi-frame
+  if (layer.type === 'file' && layer.source?.outputFilesByFrame?.length > 1) {
+    precomputeFileLayerRanges(layer)
+  }
 
   try {
     const buffer = await fetchVtpBuffer(layer, frame)
@@ -189,7 +259,8 @@ async function addLayerToScene(layer, frame = 0) {
     const polydata = reader.getOutputData(0)
 
     const scalarName = layer.type === 'zone' ? (layer.source.scalarName || '') : ''
-    const { actor, scalarBarActor, mapper } = createActorFromPolydata(polydata, scalarName)
+    const globalRange = getLayerGlobalRange(layer, scalarName)
+    const { actor, scalarBarActor, mapper, resolvedScalar } = createActorFromPolydata(polydata, scalarName, globalRange)
 
     actor.setVisibility(layer.visible)
     if (scalarBarActor) scalarBarActor.setVisibility(layer.visible)
@@ -198,7 +269,7 @@ async function addLayerToScene(layer, frame = 0) {
     renderer.addActor(actor)
     if (scalarBarActor) renderer.addActor(scalarBarActor)
 
-    layerMap.set(layer.id, { actor, scalarBarActor, mapper, polydata })
+    layerMap.set(layer.id, { actor, scalarBarActor, mapper, polydata, scalarName: resolvedScalar })
 
     console.log(`[SceneViewer] Added layer: ${layer.name} (${layer.id})`)
   } catch (err) {
@@ -220,8 +291,8 @@ async function reloadLayerData(layer, frame) {
     // Update mapper input data in-place (keeps actor/visibility intact)
     entry.mapper.setInputData(polydata)
 
-    // Update scalar coloring if needed
-    const scalarName = layer.type === 'zone' ? (layer.source.scalarName || '') : ''
+    // Update scalar coloring with global range (consistent across frames)
+    const scalarName = entry.scalarName || (layer.type === 'zone' ? (layer.source.scalarName || '') : '')
     if (scalarName) {
       const pd = polydata.getPointData()
       const cd = polydata.getCellData()
@@ -229,7 +300,9 @@ async function reloadLayerData(layer, frame) {
       let useCellData = false
       if (!arr) { arr = cd.getArrayByName(scalarName); useCellData = true }
       if (arr && arr.getNumberOfComponents() === 1) {
-        const [lo, hi] = arr.getRange()
+        const perFrame = arr.getRange()
+        const globalRange = getLayerGlobalRange(layer, scalarName)
+        const [lo, hi] = globalRange || perFrame
         const ctf = buildRainbowLut(lo, hi)
         entry.mapper.setLookupTable(ctf)
         entry.mapper.setScalarRange(lo, hi)
