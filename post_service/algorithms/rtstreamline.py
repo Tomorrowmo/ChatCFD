@@ -74,8 +74,8 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     dz = bounds[5] - bounds[4]
     diagonal = math.sqrt(dx * dx + dy * dy + dz * dz)
 
-    seed_start = params.get("seed_start")
-    seed_end = params.get("seed_end")
+    seed_start = params.get("seed_start") or params.get("point1")
+    seed_end = params.get("seed_end") or params.get("point2")
     if seed_start is None:
         seed_start = [bounds[0], bounds[2], bounds[4]]
     if seed_end is None:
@@ -108,8 +108,11 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
         return {"error": f"Failed to build RomtekPostDataSet: {e}"}
 
     # --- 5. Configure and run filter ---
-    n_lines = int(params.get("n_lines", 100))
-    seed_type = int(params.get("seed_type", 0))
+    n_lines = int(params.get("n_lines") or params.get("n_seeds") or 100)
+    _seed_type_map = {"line": 0, "sphere": 1}
+    raw_seed = params.get("seed_type", 0)
+    seed_type = _seed_type_map.get(raw_seed, raw_seed) if isinstance(raw_seed, str) else raw_seed
+    seed_type = int(seed_type)
     step_ratio = float(params.get("step_ratio", 1.0))
 
     try:
