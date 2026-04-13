@@ -27,19 +27,50 @@ const scalarRanges = ref({})  // {zone: {scalar: [min, max]}} — global across 
 const frameCount = computed(() => liveFrameCount.value || props.data?.frame_count || 1)
 const timeLabels = computed(() => liveTimeLabels.value.length ? liveTimeLabels.value : (props.data?.time_labels || []))
 
+// Total point count across all zones (for the "All" option label)
+const totalPoints = computed(() => zones.value.reduce((sum, z) => sum + (z.point_count || z.n_points || 0), 0))
+
 // Global scalar range for the current zone+scalar selection (multi-frame consistency)
 const currentScalarRange = computed(() => {
-  const zoneRanges = scalarRanges.value[selectedZone.value]
+  const ranges = scalarRanges.value
+  if (!Object.keys(ranges).length) return null
+  const scalar = selectedScalar.value
+  if (!scalar) return null
+
+  if (selectedZone.value === '__all__') {
+    // Merge range across all zones
+    let lo = Infinity, hi = -Infinity
+    for (const zr of Object.values(ranges)) {
+      const r = zr[scalar]
+      if (r) { lo = Math.min(lo, r[0]); hi = Math.max(hi, r[1]) }
+    }
+    return lo <= hi ? [lo, hi] : null
+  }
+  const zoneRanges = ranges[selectedZone.value]
   if (!zoneRanges) return null
-  const range = zoneRanges[selectedScalar.value]
-  return range || null  // [min, max] or null
+  return zoneRanges[scalar] || null
 })
 
 // Use live data if available, fall back to artifact snapshot
 const zones = computed(() => liveZones.value.length ? liveZones.value : (props.data?.zones || []))
 const currentZoneScalars = computed(() => {
-  const z = zones.value.find((x) => x.name === selectedZone.value)
-  const scalars = z?.scalars || []
+  let scalars
+  if (selectedZone.value === '__all__') {
+    // Union of scalars across all zones (deduplicated by raw_name)
+    const seen = new Set()
+    scalars = []
+    for (const z of zones.value) {
+      for (const s of (z.scalars || [])) {
+        if (!seen.has(s.raw_name)) {
+          seen.add(s.raw_name)
+          scalars.push(s)
+        }
+      }
+    }
+  } else {
+    const z = zones.value.find((x) => x.name === selectedZone.value)
+    scalars = z?.scalars || []
+  }
   return [...scalars].sort((a, b) => (a.display_name || a.raw_name).localeCompare(b.display_name || b.raw_name))
 })
 
@@ -74,8 +105,8 @@ async function refreshZones() {
 
 function autoSelect(forceReset = false) {
   const z = zones.value
-  if (z.length && (forceReset || !selectedZone.value || !z.find(x => x.name === selectedZone.value))) {
-    selectedZone.value = z[0].name
+  if (z.length && (forceReset || !selectedZone.value || (selectedZone.value !== '__all__' && !z.find(x => x.name === selectedZone.value)))) {
+    selectedZone.value = '__all__'
     const firstScalar = z[0].scalars?.[0]
     selectedScalar.value = firstScalar?.raw_name || ''
   }
@@ -119,6 +150,7 @@ watch(sessionId, () => { refreshZones() })
       <label>
         Zone:
         <select v-model="selectedZone">
+          <option value="__all__">All Zones ({{ totalPoints }} pts)</option>
           <option v-for="z in zones" :key="z.name" :value="z.name">
             {{ z.name }} ({{ z.point_count || z.n_points || '?' }} pts)
           </option>

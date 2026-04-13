@@ -71,20 +71,35 @@ def setup(app, engine):
 
             # Find zone block by name in the multiblock dataset
             multiblock = post_data.get_vtk_data()
-            target = None
-            for i in range(multiblock.GetNumberOfBlocks()):
-                meta = multiblock.GetMetaData(i)
-                if meta and meta.Get(vtk.vtkCompositeDataSet.NAME()) == zone:
-                    target = multiblock.GetBlock(i)
-                    break
-            if target is None:
-                return Response(content=b"", status_code=404)
 
-            # Extract surface (handles both surface and volume meshes)
-            geo = vtk.vtkGeometryFilter()
-            geo.SetInputData(target)
-            geo.Update()
-            polydata = geo.GetOutput()
+            if zone == "__all__":
+                # Merge all zones into a single polydata
+                appender = vtk.vtkAppendPolyData()
+                for i in range(multiblock.GetNumberOfBlocks()):
+                    block = multiblock.GetBlock(i)
+                    if block is None:
+                        continue
+                    geo = vtk.vtkGeometryFilter()
+                    geo.SetInputData(block)
+                    geo.Update()
+                    appender.AddInputData(geo.GetOutput())
+                appender.Update()
+                polydata = appender.GetOutput()
+            else:
+                target = None
+                for i in range(multiblock.GetNumberOfBlocks()):
+                    meta = multiblock.GetMetaData(i)
+                    if meta and meta.Get(vtk.vtkCompositeDataSet.NAME()) == zone:
+                        target = multiblock.GetBlock(i)
+                        break
+                if target is None:
+                    return Response(content=b"", status_code=404)
+
+                # Extract surface (handles both surface and volume meshes)
+                geo = vtk.vtkGeometryFilter()
+                geo.SetInputData(target)
+                geo.Update()
+                polydata = geo.GetOutput()
 
             # Write to in-memory VTP (XML PolyData, binary + zlib — fastest on the wire)
             writer = vtk.vtkXMLPolyDataWriter()
