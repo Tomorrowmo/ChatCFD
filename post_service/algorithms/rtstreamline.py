@@ -109,10 +109,9 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
 
     # --- 5. Configure and run filter ---
     n_lines = int(params.get("n_lines") or params.get("n_seeds") or 100)
-    _seed_type_map = {"line": 0, "sphere": 1}
+    _seed_type_map = {"line": 0, "sphere": 1, "point": 0, "grid": 0, "rake": 0}
     raw_seed = params.get("seed_type", 0)
-    seed_type = _seed_type_map.get(raw_seed, raw_seed) if isinstance(raw_seed, str) else raw_seed
-    seed_type = int(seed_type)
+    seed_type = _seed_type_map.get(str(raw_seed).lower(), 0) if isinstance(raw_seed, str) else int(raw_seed)
     step_ratio = float(params.get("step_ratio", 1.0))
 
     try:
@@ -156,7 +155,7 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     sl_dir = os.path.join(output_dir, "Streamline")
     os.makedirs(sl_dir, exist_ok=True)
 
-    seed_label = "line" if seed_type == 0 else "sphere"
+    seed_label = {0: "line", 1: "sphere"}.get(seed_type, "line")
     all_paths = _save_frames(
         frame_outputs, sl_dir,
         f"streamline_{seed_label}_n{n_lines}", frame_count,
