@@ -36,8 +36,65 @@ class PostEngine:
         "controlDict": "OpenFoamReader",
     }
 
+    def _is_supported_file(self, file_path: str) -> bool:
+        """Check if a file is a supported CFD format."""
+        basename = os.path.basename(file_path)
+        filename_no_ext = os.path.splitext(basename)[0]
+        if basename in self._FILENAME_READER_MAP or filename_no_ext in self._FILENAME_READER_MAP:
+            return True
+        _, ext = os.path.splitext(file_path)
+        return ext.lower() in self._READER_MAP
+
+    def load_directory(self, session_id: str, dir_path: str) -> dict:
+        """Load all supported CFD files from a directory into one session."""
+        dir_path = os.path.normpath(dir_path).replace("\\", "/")
+        if not os.path.isdir(dir_path):
+            return {"error": f"Directory not found: {dir_path}"}
+
+        # Collect supported files
+        targets = []
+        for f in sorted(os.listdir(dir_path)):
+            full = os.path.join(dir_path, f)
+            if os.path.isfile(full) and self._is_supported_file(full):
+                targets.append(os.path.normpath(full).replace("\\", "/"))
+
+        if not targets:
+            supported = list(self._READER_MAP.keys()) + list(self._FILENAME_READER_MAP.keys())
+            return {"error": f"No supported files in '{dir_path}'. Supported formats: {supported}"}
+
+        # Load each file into the same session
+        results = []
+        errors = []
+        for fpath in targets:
+            r = self.load_file(session_id, fpath)
+            if "error" in r:
+                errors.append({"file": fpath, "error": r["error"]})
+            else:
+                results.append(r)
+
+        if not results:
+            return {"error": f"Failed to load any files. Errors: {errors}"}
+
+        return {
+            "type": "directory_load",
+            "summary": f"Loaded {len(results)} file(s) from {dir_path}" + (
+                f" ({len(errors)} failed)" if errors else ""
+            ),
+            "directory": dir_path,
+            "loaded_files": [r["file_path"] for r in results],
+            "file_summaries": results,
+            "errors": errors,
+            "total_loaded": len(results),
+            "total_failed": len(errors),
+        }
+
     def load_file(self, session_id: str, file_path: str) -> dict:
         file_path = os.path.normpath(file_path).replace("\\", "/")
+
+        # If path is a directory, load all supported files within it
+        if os.path.isdir(file_path):
+            return self.load_directory(session_id, file_path)
+
         if not os.path.exists(file_path):
             return {"error": f"File not found: {file_path}"}
 
