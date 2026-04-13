@@ -121,6 +121,8 @@ function sortIndicator(colIdx) {
 const canvasRef = ref(null)
 const tooltipRef = ref(null)
 const tooltip = ref({ show: false, x: 0, y: 0, xVal: '', yVal: '' })
+const chartViewRange = ref(null)  // {xLo,xHi,yLo,yHi} or null = fit all
+const isZoomed = computed(() => chartViewRange.value !== null)
 let chartState = null      // cached geometry for hover lookup
 let chartResizeObs = null
 
@@ -230,16 +232,22 @@ function drawChart() {
   }
   allPoints.sort((a, b) => a.x - b.x)
 
-  // Compute range (safe for huge arrays — no spread operator)
+  // Compute data range (safe for huge arrays — no spread operator)
   let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity
   for (const p of allPoints) {
     if (p.x < xMin) xMin = p.x; if (p.x > xMax) xMax = p.x
     if (p.y < yMin) yMin = p.y; if (p.y > yMax) yMax = p.y
   }
-  const xPad = (xMax - xMin || 1) * 0.05
-  const yPad = (yMax - yMin || 1) * 0.05
-  const xLo = xMin - xPad, xHi = xMax + xPad
-  const yLo = yMin - yPad, yHi = yMax + yPad
+
+  let xLo, xHi, yLo, yHi
+  if (chartViewRange.value) {
+    ;({ xLo, xHi, yLo, yHi } = chartViewRange.value)
+  } else {
+    const xPad = (xMax - xMin || 1) * 0.05
+    const yPad = (yMax - yMin || 1) * 0.05
+    xLo = xMin - xPad; xHi = xMax + xPad
+    yLo = yMin - yPad; yHi = yMax + yPad
+  }
 
   // Layout
   const ml = 65, mr = 20, mt = 20, mb = 50
@@ -247,9 +255,21 @@ function drawChart() {
   const sx = v => ml + (v - xLo) / (xHi - xLo) * pw
   const sy = v => mt + ph - (v - yLo) / (yHi - yLo) * ph
 
+  // Filter to visible x-range (with 1 extra point each side for edge continuity)
+  let visStart = 0, visEnd = allPoints.length
+  if (chartViewRange.value) {
+    visStart = allPoints.findIndex(p => p.x >= xLo)
+    if (visStart < 0) visStart = allPoints.length
+    if (visStart > 0) visStart--  // include one point before for line continuity
+    visEnd = allPoints.findIndex(p => p.x > xHi)
+    if (visEnd < 0) visEnd = allPoints.length
+    if (visEnd < allPoints.length) visEnd++  // include one point after
+  }
+  const visPts = allPoints.slice(visStart, visEnd)
+
   // Downsample for rendering
   const maxPts = Math.min(2000, pw * 2)
-  const displayPts = lttb(allPoints, maxPts)
+  const displayPts = lttb(visPts.length > 0 ? visPts : allPoints, maxPts)
 
   // Cache for hover
   chartState = { allPoints, sx, sy, xLo, xHi, yLo, yHi, ml, mr, mt, mb, pw, ph, W, H }
@@ -413,12 +433,53 @@ function onChartHover(e) {
   }
 }
 
+function onChartWheel(e) {
+  e.preventDefault()
+  if (!chartState) return
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const mx = e.clientX - rect.left
+  const my = e.clientY - rect.top
+  const { ml, mt, pw, ph, xLo, xHi, yLo, yHi } = chartState
+
+  // Only zoom when cursor is inside plot area
+  if (mx < ml || mx > ml + pw || my < mt || my > mt + ph) return
+
+  // Zoom factor: scroll up = zoom in, scroll down = zoom out
+  const factor = e.deltaY > 0 ? 1.2 : 1 / 1.2
+
+  // Cursor position in data coordinates
+  const xFrac = (mx - ml) / pw
+  const yFrac = 1 - (my - mt) / ph   // canvas y is inverted
+  const cx = xLo + xFrac * (xHi - xLo)
+  const cy = yLo + yFrac * (yHi - yLo)
+
+  // Scale ranges centered on cursor position
+  const newXLo = cx - (cx - xLo) * factor
+  const newXHi = cx + (xHi - cx) * factor
+  const newYLo = cy - (cy - yLo) * factor
+  const newYHi = cy + (yHi - cy) * factor
+
+  chartViewRange.value = { xLo: newXLo, xHi: newXHi, yLo: newYLo, yHi: newYHi }
+  drawChart()
+}
+
+function resetChartZoom() {
+  chartViewRange.value = null
+  tooltip.value.show = false
+  drawChart()
+}
+
 function onChartLeave() {
   tooltip.value.show = false
   drawChart()
 }
 
-// Redraw on data/column change
+// Redraw on data/column change; reset zoom when data changes
+watch([chartX, chartY, rows], () => {
+  chartViewRange.value = null
+})
 watch([chartX, chartY, rows, mode], () => {
   if (mode.value === 'chart') nextTick(drawChart)
 })
@@ -482,7 +543,10 @@ onBeforeUnmount(() => { chartResizeObs?.disconnect() })
         class="chart-canvas"
         @mousemove="onChartHover"
         @mouseleave="onChartLeave"
+        @wheel.prevent="onChartWheel"
+        @dblclick="resetChartZoom"
       />
+      <button v-if="isZoomed" class="zoom-reset-btn" @click="resetChartZoom" title="Reset zoom (or double-click chart)">Reset</button>
       <div
         v-if="tooltip.show"
         class="chart-tooltip"
@@ -584,4 +648,21 @@ onBeforeUnmount(() => { chartResizeObs?.disconnect() })
 }
 .tt-row { line-height: 1.5; }
 .tt-y { color: #6db3f8; font-weight: 600; }
+.zoom-reset-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 5px;
+  background: rgba(30, 32, 38, 0.85);
+  backdrop-filter: blur(6px);
+  color: #b0b4be;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  z-index: 10;
+  transition: background 0.15s, color 0.15s;
+}
+.zoom-reset-btn:hover { background: rgba(79,143,247,0.3); color: #fff; }
 </style>
