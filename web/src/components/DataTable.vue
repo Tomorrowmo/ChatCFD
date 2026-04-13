@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useApi } from '../composables/useApi.js'
 
 const props = defineProps({
@@ -27,6 +27,45 @@ const plotW = chartW - marginLeft - marginRight
 const plotH = chartH - marginTop - marginBottom
 
 const api = useApi()
+
+// --- Virtual scroll state ---
+const ROW_HEIGHT = 33  // px per row (padding 8*2 + font ~13 + border 1)
+const BUFFER = 10      // extra rows above/below viewport
+const scrollRef = ref(null)
+const scrollTop = ref(0)
+const viewportH = ref(400)
+
+const totalHeight = computed(() => rows.value.length * ROW_HEIGHT)
+
+const visibleRange = computed(() => {
+  const start = Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - BUFFER)
+  const visibleCount = Math.ceil(viewportH.value / ROW_HEIGHT) + 2 * BUFFER
+  const end = Math.min(rows.value.length, start + visibleCount)
+  return { start, end }
+})
+
+const visibleRows = computed(() => {
+  const { start, end } = visibleRange.value
+  return rows.value.slice(start, end).map((row, i) => ({ row, idx: start + i }))
+})
+
+const offsetY = computed(() => visibleRange.value.start * ROW_HEIGHT)
+
+function onScroll(e) {
+  scrollTop.value = e.target.scrollTop
+}
+
+let resizeObserver = null
+onMounted(() => {
+  if (scrollRef.value) {
+    viewportH.value = scrollRef.value.clientHeight
+    resizeObserver = new ResizeObserver(([entry]) => {
+      viewportH.value = entry.contentRect.height
+    })
+    resizeObserver.observe(scrollRef.value)
+  }
+})
+onBeforeUnmount(() => { resizeObserver?.disconnect() })
 
 watch(
   () => props.path,
@@ -66,6 +105,9 @@ function parseCSV(text) {
 
   headers.value = lines[0].split(',').map((h) => h.trim())
   rows.value = lines.slice(1).map((line) => line.split(',').map((c) => c.trim()))
+  // Reset scroll position on new data
+  scrollTop.value = 0
+  if (scrollRef.value) scrollRef.value.scrollTop = 0
 }
 
 function toggleSort(colIdx) {
@@ -175,13 +217,15 @@ function formatTick(v) {
           <option v-for="h in headers" :key="h" :value="h">{{ h }}</option>
         </select></label>
       </template>
+      <span v-if="mode === 'table' && rows.length" class="row-count">{{ rows.length.toLocaleString() }} rows</span>
     </div>
 
     <div v-if="loading" class="table-status">Loading...</div>
     <div v-else-if="error" class="table-status error">{{ error }}</div>
 
-    <div v-else-if="mode === 'table'" class="table-scroll">
-      <table class="data-table">
+    <div v-else-if="mode === 'table'" ref="scrollRef" class="table-scroll" @scroll="onScroll">
+      <!-- Sticky header table (outside virtual scroll) -->
+      <table class="data-table data-table-header">
         <thead>
           <tr>
             <th
@@ -194,14 +238,19 @@ function formatTick(v) {
             </th>
           </tr>
         </thead>
-        <tbody>
-          <tr v-for="(row, ridx) in rows" :key="ridx">
-            <td v-for="(cell, cidx) in row" :key="cidx" class="mono">
-              {{ cell }}
-            </td>
-          </tr>
-        </tbody>
       </table>
+      <!-- Virtual scroll body -->
+      <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+        <table class="data-table data-table-body" :style="{ transform: `translateY(${offsetY}px)` }">
+          <tbody>
+            <tr v-for="item in visibleRows" :key="item.idx">
+              <td v-for="(cell, cidx) in item.row" :key="cidx" class="mono">
+                {{ cell }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div v-else-if="mode === 'chart'" class="chart-container">
@@ -325,6 +374,13 @@ function formatTick(v) {
   max-width: 140px;
 }
 
+.row-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .table-status {
   padding: 40px;
   text-align: center;
@@ -346,11 +402,23 @@ function formatTick(v) {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: fixed;
+}
+
+.data-table-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.data-table-body {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
 }
 
 .data-table th {
-  position: sticky;
-  top: 0;
   background: var(--bg-input);
   padding: 10px 14px;
   text-align: left;
@@ -376,6 +444,11 @@ function formatTick(v) {
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   color: var(--text-primary);
+  height: 33px;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .data-table tbody tr:hover {
