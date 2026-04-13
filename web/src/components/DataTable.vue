@@ -47,15 +47,19 @@ function onScroll(e) {
 }
 
 let resizeObserver = null
-onMounted(() => {
-  if (scrollRef.value) {
-    viewportH.value = scrollRef.value.clientHeight
+// Watch scrollRef itself — fires when the v-else-if branch creates/destroys the element.
+// flush:'post' ensures the DOM is updated before we measure.
+watch(scrollRef, (el) => {
+  resizeObserver?.disconnect()
+  if (el) {
+    scrollTop.value = el.scrollTop   // sync — new element starts at 0
+    viewportH.value = el.clientHeight
     resizeObserver = new ResizeObserver(([entry]) => {
       viewportH.value = entry.contentRect.height
     })
-    resizeObserver.observe(scrollRef.value)
+    resizeObserver.observe(el)
   }
-})
+}, { flush: 'post' })
 onBeforeUnmount(() => { resizeObserver?.disconnect() })
 
 watch(
