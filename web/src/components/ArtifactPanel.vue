@@ -136,6 +136,21 @@ const viewerType = computed(() => {
       </button>
     </div>
 
+    <!-- Fallback header when no file tabs -->
+    <div class="artifact-header" v-if="fileTabs.length === 0">
+      <div class="header-left">
+        <span class="header-file-hint" v-if="activeArtifact?.source_file" :title="activeArtifact.source_file">
+          {{ activeArtifact.source_file.split('/').pop() }}
+        </span>
+        <h2 class="header-title truncate" v-if="activeArtifact">{{ activeArtifact.title }}</h2>
+      </div>
+      <button class="close-btn" @click="closeArtifactPanel" title="Close">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M6 6 L18 18 M18 6 L6 18" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+
     <!-- Result tabs row (under active file) -->
     <div class="result-bar" v-if="resultTabs.length > 0">
       <!-- Mesh tab (always first if file is loaded) -->
@@ -158,18 +173,6 @@ const viewerType = computed(() => {
         :title="rt.summary"
       >
         <span class="result-label">{{ rt.title }}</span>
-      </button>
-    </div>
-
-    <!-- Fallback header when no file tabs -->
-    <div class="artifact-header" v-if="fileTabs.length === 0">
-      <div class="header-left">
-        <h2 class="header-title truncate" v-if="activeArtifact">{{ activeArtifact.title }}</h2>
-      </div>
-      <button class="close-btn" @click="closeArtifactPanel" title="Close">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5">
-          <path d="M6 6 L18 18 M18 6 L6 18" stroke-linecap="round"/>
-        </svg>
       </button>
     </div>
 
@@ -335,6 +338,15 @@ const viewerType = computed(() => {
   gap: 10px;
   flex: 1;
   min-width: 0;
+}
+.header-file-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .header-title {
   font-size: 14px;

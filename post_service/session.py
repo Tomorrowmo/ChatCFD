@@ -153,6 +153,153 @@ class FrameSequence:
         self.reader = None
 
 
+class MultiFileFrameSequence:
+    """Frame sequence where each file in a directory is one frame.
+
+    Same interface as FrameSequence so Session/HTTP API code works unchanged.
+    """
+
+    def __init__(self, file_paths: list[str], reader_names: list[str],
+                 virtual_path: str, max_cache: int = 50):
+        self.file_paths = file_paths          # one path per frame
+        self.reader_names = reader_names      # reader name per frame
+        self.file_path = virtual_path         # directory path, used as session key
+        self.frame_count = len(file_paths)
+        self.time_labels = [os.path.splitext(os.path.basename(fp))[0] for fp in file_paths]
+        self.reader = None                    # no single reader
+        self._lock = threading.Lock()
+        self._cache: dict[int, PostData] = {}
+        self._cache_order: list[int] = []
+        self._max_cache = max_cache
+        self._global_ranges: dict | None = None
+        self._preloading = False
+        self._preload_done = False
+
+    def _read_file(self, index: int):
+        """Read a single file and return a deep-copied multiblock."""
+        reader = vtk.vtkRomtekIODriver()
+        reader.ReadFiles([self.file_paths[index]], self.reader_names[index], False)
+        mb = reader.getOutPut()
+        if mb is None:
+            return None
+        mb_copy = vtk.vtkMultiBlockDataSet()
+        mb_copy.DeepCopy(mb)
+        return mb_copy
+
+    def get_frame(self, index: int) -> PostData:
+        """Load frame (= file) on demand. Double-check locking for parallel reads."""
+        if index < 0 or index >= self.frame_count:
+            raise IndexError(f"Frame index {index} out of range [0, {self.frame_count})")
+
+        with self._lock:
+            if index in self._cache:
+                self._cache_order.remove(index)
+                self._cache_order.append(index)
+                return self._cache[index]
+
+        # Read outside lock — each file has its own reader, no shared state
+        mb = self._read_file(index)
+        if mb is None:
+            raise RuntimeError(f"Failed to read frame {index}: {self.file_paths[index]}")
+        pd = PostData(mb, self.file_path)
+
+        with self._lock:
+            if index in self._cache:
+                self._cache_order.remove(index)
+                self._cache_order.append(index)
+                return self._cache[index]
+            if len(self._cache) >= self._max_cache:
+                oldest = self._cache_order.pop(0)
+                del self._cache[oldest]
+            self._cache[index] = pd
+            self._cache_order.append(index)
+            return pd
+
+    def load_all_multiblocks(self) -> list:
+        """Load ALL frames' multiblocks for algorithm data bridge."""
+        result = []
+        for i in range(self.frame_count):
+            mb = self._read_file(i)
+            if mb is not None:
+                result.append(mb)
+        return result
+
+    def set_max_cache(self, n: int):
+        self._max_cache = max(1, n)
+        with self._lock:
+            while len(self._cache) > self._max_cache:
+                oldest = self._cache_order.pop(0)
+                del self._cache[oldest]
+
+    def get_global_scalar_ranges(self) -> dict:
+        """Compute global min/max for each scalar across ALL frames (files)."""
+        if self._global_ranges is not None:
+            return self._global_ranges
+
+        ranges: dict[str, dict[str, list[float]]] = {}
+        for i in range(self.frame_count):
+            mb = self._read_file(i)
+            if mb is None:
+                continue
+
+            with self._lock:
+                if i not in self._cache and len(self._cache) < self._max_cache:
+                    pd = PostData(mb, self.file_path)
+                    self._cache[i] = pd
+                    self._cache_order.append(i)
+
+            for bi in range(mb.GetNumberOfBlocks()):
+                block = mb.GetBlock(bi)
+                if block is None:
+                    continue
+                meta = mb.GetMetaData(bi)
+                if meta and meta.Has(vtk.vtkCompositeDataSet.NAME()):
+                    zone_name = meta.Get(vtk.vtkCompositeDataSet.NAME())
+                else:
+                    zone_name = f"Block_{bi}"
+                if zone_name not in ranges:
+                    ranges[zone_name] = {}
+                for data_obj in (block.GetPointData(), block.GetCellData()):
+                    for ai in range(data_obj.GetNumberOfArrays()):
+                        arr = data_obj.GetArray(ai)
+                        if arr is None:
+                            continue
+                        name = arr.GetName()
+                        if not name:
+                            continue
+                        lo, hi = arr.GetRange()
+                        if name in ranges[zone_name]:
+                            prev = ranges[zone_name][name]
+                            prev[0] = min(prev[0], lo)
+                            prev[1] = max(prev[1], hi)
+                        else:
+                            ranges[zone_name][name] = [lo, hi]
+
+        self._global_ranges = ranges
+        self._preload_done = True
+        return ranges
+
+    def start_preload(self):
+        if self._preloading or self._preload_done:
+            return
+        self._preloading = True
+        thread = threading.Thread(target=self._preload_worker, daemon=True)
+        thread.start()
+
+    def _preload_worker(self):
+        try:
+            self.get_global_scalar_ranges()
+            print(f"[MultiFileFrameSequence] Preload done: {len(self._cache)}/{self.frame_count} cached")
+        except Exception as e:
+            print(f"[MultiFileFrameSequence] Preload error: {e}")
+        finally:
+            self._preloading = False
+
+    def close(self):
+        self._cache.clear()
+        self._cache_order.clear()
+
+
 class SessionState:
     def __init__(self, session_id: str):
         self.session_id = session_id

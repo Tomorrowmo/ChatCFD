@@ -8,7 +8,7 @@ import vtk
 from post_service.algorithm_registry import AlgorithmRegistry
 from post_service.archive import AnalysisArchive
 from post_service.post_data import PostData
-from post_service.session import FrameSequence, SessionManager
+from post_service.session import FrameSequence, MultiFileFrameSequence, SessionManager
 
 
 class PostEngine:
@@ -46,47 +46,65 @@ class PostEngine:
         return ext.lower() in self._READER_MAP
 
     def load_directory(self, session_id: str, dir_path: str) -> dict:
-        """Load all supported CFD files from a directory into one session."""
+        """Load all supported CFD files from a directory as a single multi-frame sequence.
+
+        Each file becomes one frame. Returns the same format as load_file() so the
+        agent/frontend treat it identically to a multi-frame single file.
+        """
         dir_path = os.path.normpath(dir_path).replace("\\", "/")
         if not os.path.isdir(dir_path):
             return {"error": f"Directory not found: {dir_path}"}
 
-        # Collect supported files
+        # Collect supported files with reader names
         targets = []
+        reader_names = []
         for f in sorted(os.listdir(dir_path)):
-            full = os.path.join(dir_path, f)
-            if os.path.isfile(full) and self._is_supported_file(full):
-                targets.append(os.path.normpath(full).replace("\\", "/"))
+            full = os.path.normpath(os.path.join(dir_path, f)).replace("\\", "/")
+            if not os.path.isfile(full):
+                continue
+            basename = os.path.basename(full)
+            filename_no_ext = os.path.splitext(basename)[0]
+            rn = self._FILENAME_READER_MAP.get(basename, "") or \
+                 self._FILENAME_READER_MAP.get(filename_no_ext, "")
+            if not rn:
+                _, ext = os.path.splitext(full)
+                rn = self._READER_MAP.get(ext.lower(), "")
+            if rn:
+                targets.append(full)
+                reader_names.append(rn)
 
         if not targets:
             supported = list(self._READER_MAP.keys()) + list(self._FILENAME_READER_MAP.keys())
             return {"error": f"No supported files in '{dir_path}'. Supported formats: {supported}"}
 
-        # Load each file into the same session
-        results = []
-        errors = []
-        for fpath in targets:
-            r = self.load_file(session_id, fpath)
-            if "error" in r:
-                errors.append({"file": fpath, "error": r["error"]})
-            else:
-                results.append(r)
+        # Build multi-file frame sequence (each file = one frame)
+        sequence = MultiFileFrameSequence(targets, reader_names, dir_path)
 
-        if not results:
-            return {"error": f"Failed to load any files. Errors: {errors}"}
+        # Load frame 0 for immediate use
+        try:
+            frame0 = sequence.get_frame(0)
+        except Exception as e:
+            return {"error": f"Failed to read first file: {e}"}
 
-        return {
-            "type": "directory_load",
-            "summary": f"Loaded {len(results)} file(s) from {dir_path}" + (
-                f" ({len(errors)} failed)" if errors else ""
-            ),
-            "directory": dir_path,
-            "loaded_files": [r["file_path"] for r in results],
-            "file_summaries": results,
-            "errors": errors,
-            "total_loaded": len(results),
-            "total_failed": len(errors),
-        }
+        # Start background preload
+        if sequence.frame_count > 1:
+            sequence.start_preload()
+
+        # Register in session
+        state = self.session_mgr.get(session_id)
+        if state is None:
+            state = self.session_mgr.create(session_id)
+        state.post_data = frame0
+        state._sequence_map[dir_path] = sequence
+        state.output_dir = dir_path
+
+        # Return single-file compatible summary
+        summary = frame0.get_summary()
+        summary["file_path"] = dir_path
+        summary["frame_count"] = sequence.frame_count
+        summary["time_labels"] = sequence.time_labels
+        print(f"[Engine.load_directory] {dir_path}: {sequence.frame_count} files as frames")
+        return summary
 
     def load_file(self, session_id: str, file_path: str) -> dict:
         file_path = os.path.normpath(file_path).replace("\\", "/")

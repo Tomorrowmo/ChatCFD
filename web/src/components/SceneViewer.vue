@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import LayerPanel from './LayerPanel.vue'
+import TimeControls from './TimeControls.vue'
 
 import '@kitware/vtk.js/Rendering/Profiles/Geometry'
 import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow'
@@ -22,8 +23,14 @@ const { activeSceneLayers } = useChatStore()
 
 const containerRef = ref(null)
 const statusMsg = ref('')
+const currentFrame = ref(0)
+const timeControlsRef = ref(null)
+
+const frameCount = computed(() => props.meshData?.frame_count || 1)
+const timeLabels = computed(() => props.meshData?.time_labels || [])
 
 let fullScreenRenderer = null
+let hasLoadedOnce = false
 // layerId -> { actor, scalarBarActor, polydata }
 const layerMap = new Map()
 
@@ -82,16 +89,25 @@ function buildRainbowLut(lo, hi) {
   return ctf
 }
 
-async function fetchVtpBuffer(layer) {
+async function fetchVtpBuffer(layer, frame = 0) {
   if (layer.type === 'zone') {
     const { sessionId, zone, sourceFile } = layer.source
-    const fileParam = sourceFile ? `?file=${encodeURIComponent(sourceFile)}` : ''
-    const url = `http://localhost:8000/api/surface/${sessionId}/${encodeURIComponent(zone)}${fileParam}`
+    const params = new URLSearchParams()
+    if (sourceFile) params.set('file', sourceFile)
+    if (frame > 0) params.set('frame', String(frame))
+    const qs = params.toString() ? `?${params}` : ''
+    const url = `http://localhost:8000/api/surface/${sessionId}/${encodeURIComponent(zone)}${qs}`
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching zone ${zone}`)
     return resp.arrayBuffer()
   } else {
-    const safePath = layer.source.filePath.split('/').map(s => encodeURIComponent(s)).join('/')
+    // For file-type layers, check for per-frame file paths
+    const frameFiles = layer.source.outputFilesByFrame
+    let filePath = layer.source.filePath
+    if (frameFiles && frameFiles.length > frame) {
+      filePath = frameFiles[frame]
+    }
+    const safePath = filePath.split('/').map(s => encodeURIComponent(s)).join('/')
     const url = `http://localhost:8000/api/file/${safePath}`
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching file`)
@@ -162,12 +178,12 @@ function createActorFromPolydata(polydata, scalarName) {
   return { actor, scalarBarActor, mapper }
 }
 
-async function addLayerToScene(layer) {
+async function addLayerToScene(layer, frame = 0) {
   if (!fullScreenRenderer) return
   if (layerMap.has(layer.id)) return // already loaded
 
   try {
-    const buffer = await fetchVtpBuffer(layer)
+    const buffer = await fetchVtpBuffer(layer, frame)
     const reader = vtkXMLPolyDataReader.newInstance()
     reader.parseAsArrayBuffer(buffer)
     const polydata = reader.getOutputData(0)
@@ -188,6 +204,62 @@ async function addLayerToScene(layer) {
   } catch (err) {
     console.error(`[SceneViewer] Failed to add layer ${layer.name}:`, err)
   }
+}
+
+async function reloadLayerData(layer, frame) {
+  if (!fullScreenRenderer) return
+  const entry = layerMap.get(layer.id)
+  if (!entry) return
+
+  try {
+    const buffer = await fetchVtpBuffer(layer, frame)
+    const reader = vtkXMLPolyDataReader.newInstance()
+    reader.parseAsArrayBuffer(buffer)
+    const polydata = reader.getOutputData(0)
+
+    // Update mapper input data in-place (keeps actor/visibility intact)
+    entry.mapper.setInputData(polydata)
+
+    // Update scalar coloring if needed
+    const scalarName = layer.type === 'zone' ? (layer.source.scalarName || '') : ''
+    if (scalarName) {
+      const pd = polydata.getPointData()
+      const cd = polydata.getCellData()
+      let arr = pd.getArrayByName(scalarName)
+      let useCellData = false
+      if (!arr) { arr = cd.getArrayByName(scalarName); useCellData = true }
+      if (arr && arr.getNumberOfComponents() === 1) {
+        const [lo, hi] = arr.getRange()
+        const ctf = buildRainbowLut(lo, hi)
+        entry.mapper.setLookupTable(ctf)
+        entry.mapper.setScalarRange(lo, hi)
+        if (entry.scalarBarActor) entry.scalarBarActor.setScalarsToColors(ctf)
+      }
+    }
+
+    entry.polydata = polydata
+  } catch (err) {
+    console.error(`[SceneViewer] Failed to reload layer ${layer.name} frame ${frame}:`, err)
+  }
+}
+
+async function reloadAllLayers(frame) {
+  const layers = activeSceneLayers.value
+  if (!layers.length || !fullScreenRenderer) {
+    timeControlsRef.value?.frameReady()
+    return
+  }
+
+  await Promise.all(layers.map(layer => reloadLayerData(layer, frame)))
+
+  if (!hasLoadedOnce) {
+    fullScreenRenderer.getRenderer().resetCamera()
+    hasLoadedOnce = true
+  } else {
+    fullScreenRenderer.getRenderer().resetCameraClippingRange()
+  }
+  renderScene()
+  timeControlsRef.value?.frameReady()
 }
 
 function removeLayerFromScene(layerId) {
@@ -214,6 +286,11 @@ function renderScene() {
   fullScreenRenderer.getRenderWindow().render()
 }
 
+// When frame changes, reload all layer data for the new frame
+watch(currentFrame, (frame) => {
+  reloadAllLayers(frame)
+})
+
 // Sync layers from store to VTK scene
 watch(
   activeSceneLayers,
@@ -234,7 +311,7 @@ watch(
     let needsResetCamera = false
     for (const layer of layers) {
       if (!layerMap.has(layer.id)) {
-        await addLayerToScene(layer)
+        await addLayerToScene(layer, currentFrame.value)
         needsResetCamera = true
       } else {
         setLayerVisibility(layer.id, layer.visible)
@@ -243,6 +320,7 @@ watch(
 
     if (needsResetCamera) {
       fullScreenRenderer.getRenderer().resetCamera()
+      hasLoadedOnce = true
     }
     renderScene()
   },
@@ -256,11 +334,12 @@ onMounted(async () => {
   if (layers.length > 0) {
     for (const layer of layers) {
       if (!layerMap.has(layer.id)) {
-        await addLayerToScene(layer)
+        await addLayerToScene(layer, currentFrame.value)
       }
     }
     if (fullScreenRenderer) {
       fullScreenRenderer.getRenderer().resetCamera()
+      hasLoadedOnce = true
       renderScene()
     }
   }
@@ -269,6 +348,13 @@ onMounted(async () => {
 
 <template>
   <div class="scene-viewer">
+    <TimeControls
+      v-if="frameCount > 1"
+      ref="timeControlsRef"
+      :frameCount="frameCount"
+      :timeLabels="timeLabels"
+      v-model="currentFrame"
+    />
     <div class="viewer-container" ref="containerRef">
       <div v-if="statusMsg" class="viewer-overlay">{{ statusMsg }}</div>
     </div>
