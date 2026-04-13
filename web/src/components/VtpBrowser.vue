@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
+import TimeControls from './TimeControls.vue'
 
 import '@kitware/vtk.js/Rendering/Profiles/Geometry'
 import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow'
@@ -16,6 +17,9 @@ const props = defineProps({
   sessionId: { type: String, default: '' },
   baseZone: { type: String, default: '' },  // wall/tri zone name → load as background model
   sourceFile: { type: String, default: '' }, // source file path for multi-file sessions
+  frameFiles: { type: Array, default: () => [] },  // output_files_by_frame
+  frameCount: { type: Number, default: 1 },
+  timeLabels: { type: Array, default: () => [] },
 })
 
 const containerRef = ref(null)
@@ -24,6 +28,16 @@ const scalarNames = ref([])
 const selectedScalar = ref('')
 const opacity = ref(1.0)
 const selectedPreset = ref('jet')
+const currentFrame = ref(0)
+const globalScalarRanges = ref({})  // {scalarName: [min, max]} across all frames
+
+// The actual path to load — switches with frame for multi-frame results
+const activePath = computed(() => {
+  if (props.frameCount > 1 && props.frameFiles.length > currentFrame.value) {
+    return props.frameFiles[currentFrame.value]
+  }
+  return props.path
+})
 
 const colorPresets = {
   jet:         [[0,0,0,1], [0.25,0,1,1], [0.5,0,1,0], [0.75,1,1,0], [1,1,0,0]],
@@ -34,15 +48,20 @@ const colorPresets = {
   blueRed:     [[0,0,0,1], [1,1,0,0]],
 }
 
+const timeControlsRef = ref(null)
+
 let fullScreenRenderer = null
 let loadedPolydata = null
 let currentActor = null
 let baseModelPolydata = null
+let hasLoadedOnce = false
 
 onMounted(() => {
   initViewer()
   addOrientationAxes()
   loadVtp()
+  // Precompute global scalar ranges across all frame files for consistent coloring
+  if (props.frameFiles.length > 1) precomputeGlobalRanges()
 })
 
 onBeforeUnmount(() => {
@@ -52,7 +71,7 @@ onBeforeUnmount(() => {
   }
 })
 
-watch(() => props.path, () => { loadVtp() })
+watch(activePath, () => { loadVtp() })
 watch(selectedScalar, () => { if (loadedPolydata) renderPolydata() })
 watch(selectedPreset, () => { if (loadedPolydata) renderPolydata() })
 watch(opacity, (val) => {
@@ -93,6 +112,38 @@ function addOrientationAxes() {
   }
 }
 
+async function precomputeGlobalRanges() {
+  /** Load all frame files in background, collect min/max for each scalar. */
+  const ranges = {}
+  for (const filePath of props.frameFiles) {
+    try {
+      const safePath = filePath.split('/').map(s => encodeURIComponent(s)).join('/')
+      const resp = await fetch(`http://localhost:8000/api/file/${safePath}`)
+      if (!resp.ok) continue
+      const buffer = await resp.arrayBuffer()
+      const reader = vtkXMLPolyDataReader.newInstance()
+      reader.parseAsArrayBuffer(buffer)
+      const pd = reader.getOutputData(0)
+      for (const dataObj of [pd.getPointData(), pd.getCellData()]) {
+        for (let i = 0; i < dataObj.getNumberOfArrays(); i++) {
+          const arr = dataObj.getArrayByIndex(i)
+          if (arr.getNumberOfComponents() !== 1) continue
+          const name = arr.getName()
+          const [lo, hi] = arr.getRange()
+          if (name in ranges) {
+            ranges[name][0] = Math.min(ranges[name][0], lo)
+            ranges[name][1] = Math.max(ranges[name][1], hi)
+          } else {
+            ranges[name] = [lo, hi]
+          }
+        }
+      }
+    } catch { /* skip failed frames */ }
+  }
+  globalScalarRanges.value = ranges
+  console.log('[VtpBrowser] Global scalar ranges:', ranges)
+}
+
 async function loadBaseModel() {
   if (!props.sessionId || !props.baseZone) return
   try {
@@ -110,12 +161,12 @@ async function loadBaseModel() {
 }
 
 async function loadVtp() {
-  if (!fullScreenRenderer || !props.path) return
+  if (!fullScreenRenderer || !activePath.value) return
   statusMsg.value = 'Loading...'
 
   try {
     // Load base model and result in parallel
-    const safePath = props.path.split('/').map(s => encodeURIComponent(s)).join('/')
+    const safePath = activePath.value.split('/').map(s => encodeURIComponent(s)).join('/')
     const url = `http://localhost:8000/api/file/${safePath}`
 
     const [resp] = await Promise.all([
@@ -154,6 +205,7 @@ async function loadVtp() {
   } catch (err) {
     statusMsg.value = `Failed: ${err.message}`
     console.error('VtpBrowser error:', err)
+    timeControlsRef.value?.frameReady()  // don't hang playback on error
   }
 }
 
@@ -186,7 +238,10 @@ function renderPolydata() {
     const arr = useCellData ? cd.getArrayByName(scalarInfo.name) : pd.getArrayByName(scalarInfo.name)
 
     if (arr) {
-      const [lo, hi] = arr.getRange()
+      const perFrame = arr.getRange()
+      // Use global range (consistent across all frames) if available, else per-frame
+      const globalR = globalScalarRanges.value[scalarInfo.name]
+      const [lo, hi] = globalR || perFrame
       const ctf = vtkColorTransferFunction.newInstance()
       const preset = colorPresets[selectedPreset.value] || colorPresets.jet
       for (const [t, r, g, b] of preset) {
@@ -225,9 +280,16 @@ function renderPolydata() {
   actor.getProperty().setSpecular(0.0)
   currentActor = actor
   renderer.addActor(actor)
-  renderer.resetCamera()
+  if (!hasLoadedOnce) {
+    renderer.resetCamera()
+    hasLoadedOnce = true
+  } else {
+    // Keep user's camera position but update near/far clip planes for new geometry bounds
+    renderer.resetCameraClippingRange()
+  }
   renderWindow.render()
   statusMsg.value = ''
+  timeControlsRef.value?.frameReady()
 }
 </script>
 
@@ -260,6 +322,13 @@ function renderPolydata() {
         <span class="opacity-value">{{ Math.round(opacity * 100) }}%</span>
       </label>
     </div>
+    <TimeControls
+      v-if="frameCount > 1"
+      ref="timeControlsRef"
+      :frameCount="frameCount"
+      :timeLabels="timeLabels"
+      v-model="currentFrame"
+    />
     <div class="viewer-container" ref="containerRef">
       <div v-if="statusMsg" class="viewer-overlay">{{ statusMsg }}</div>
       <div class="viewer-hints">

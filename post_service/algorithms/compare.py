@@ -11,7 +11,7 @@ DEFAULTS = {
 }
 
 
-def execute(post_data, params: dict, zone_name: str) -> dict:
+def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     scalar = params.get("scalar")
     zone_a = params.get("zone_a")
     zone_b = params.get("zone_b")

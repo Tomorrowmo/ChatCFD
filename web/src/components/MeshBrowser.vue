@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch, computed, onMounted } from 'vue'
 import VtkViewer from './VtkViewer.vue'
+import TimeControls from './TimeControls.vue'
 import { useChatStore } from '../stores/chat.js'
 
 const props = defineProps({
@@ -17,6 +18,22 @@ const opacity = ref(1.0)
 const colorPreset = ref('jet')
 const liveZones = ref([])
 const loading = ref(false)
+const currentFrame = ref(0)
+const timeControlsRef = ref(null)
+const liveFrameCount = ref(0)
+const liveTimeLabels = ref([])
+const maxCache = ref(50)
+const scalarRanges = ref({})  // {zone: {scalar: [min, max]}} — global across all frames
+const frameCount = computed(() => liveFrameCount.value || props.data?.frame_count || 1)
+const timeLabels = computed(() => liveTimeLabels.value.length ? liveTimeLabels.value : (props.data?.time_labels || []))
+
+// Global scalar range for the current zone+scalar selection (multi-frame consistency)
+const currentScalarRange = computed(() => {
+  const zoneRanges = scalarRanges.value[selectedZone.value]
+  if (!zoneRanges) return null
+  const range = zoneRanges[selectedScalar.value]
+  return range || null  // [min, max] or null
+})
 
 // Use live data if available, fall back to artifact snapshot
 const zones = computed(() => liveZones.value.length ? liveZones.value : (props.data?.zones || []))
@@ -37,6 +54,15 @@ async function refreshZones() {
       const data = await resp.json()
       if (data.zones) {
         liveZones.value = data.zones
+        if (data.frame_count) liveFrameCount.value = data.frame_count
+        if (data.time_labels) liveTimeLabels.value = data.time_labels
+        if (data.max_cache) maxCache.value = data.max_cache
+        if (data.scalar_ranges) {
+          scalarRanges.value = data.scalar_ranges
+        } else if (data.frame_count > 1 && !Object.keys(scalarRanges.value).length) {
+          // Preload not ready yet — retry after a few seconds
+          setTimeout(refreshZones, 3000)
+        }
       }
     }
   } catch (e) {
@@ -71,6 +97,17 @@ watch(selectedZone, () => {
     selectedScalar.value = scalars[0].raw_name
   }
 })
+
+async function updateMaxCache(val) {
+  maxCache.value = val
+  const params = new URLSearchParams({ max_cache: String(val) })
+  if (props.sourceFile) params.set('file', props.sourceFile)
+  try {
+    await fetch(`http://localhost:8000/api/frame_cache/${sessionId.value}?${params}`, { method: 'PUT' })
+  } catch (e) {
+    console.warn('[MeshBrowser] Failed to set frame cache:', e.message)
+  }
+}
 
 onMounted(() => { refreshZones() })
 watch(sessionId, () => { refreshZones() })
@@ -124,6 +161,26 @@ watch(sessionId, () => { refreshZones() })
         {{ loading ? '...' : '↻' }}
       </button>
     </div>
+    <div class="time-row" v-if="frameCount > 1">
+      <TimeControls
+        ref="timeControlsRef"
+        :frameCount="frameCount"
+        :timeLabels="timeLabels"
+        v-model="currentFrame"
+      />
+      <label class="cache-label">
+        Cache:
+        <select :value="maxCache" @change="updateMaxCache(Number($event.target.value))">
+          <option :value="5">5</option>
+          <option :value="10">10</option>
+          <option :value="20">20</option>
+          <option :value="50">50</option>
+          <option :value="100">100</option>
+          <option :value="200">200</option>
+          <option :value="frameCount">All ({{ frameCount }})</option>
+        </select>
+      </label>
+    </div>
     <VtkViewer
       :key="`${sessionId}-${sourceFile}-${selectedZone}-${selectedScalar}-${displayMode}-${colorPreset}`"
       :sessionId="sessionId"
@@ -133,6 +190,9 @@ watch(sessionId, () => { refreshZones() })
       :displayMode="displayMode"
       :opacity="opacity"
       :colorPreset="colorPreset"
+      :frame="currentFrame"
+      :scalarRange="currentScalarRange"
+      @loaded="timeControlsRef?.frameReady()"
     />
   </div>
 </template>
@@ -190,4 +250,28 @@ watch(sessionId, () => { refreshZones() })
 .opacity-label { white-space: nowrap; }
 .opacity-slider { width: 70px; vertical-align: middle; accent-color: var(--accent); }
 .opacity-val { display: inline-block; width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.time-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.cache-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cache-label select {
+  background: var(--bg-input, var(--bg-secondary));
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
 </style>

@@ -24,7 +24,7 @@ DEFAULTS = {
 }
 
 
-def execute(post_data, params: dict, zone_name: str) -> dict:
+def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     multiblock = post_data.get_vtk_data()
 
     # --- 1. Resolve velocity component names ---
@@ -56,22 +56,7 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     else:
         resolved_color = resolved_vx  # fallback to velocity_x
 
-    # --- 2. Zone filtering ---
-    if zone_name:
-        try:
-            target_block = post_data._get_block(zone_name)
-        except ValueError as e:
-            return {"error": str(e)}
-        filtered_mb = vtk.vtkMultiBlockDataSet()
-        filtered_mb.SetNumberOfBlocks(1)
-        filtered_mb.SetBlock(0, target_block)
-        filtered_mb.GetMetaData(0).Set(
-            vtk.vtkCompositeDataSet.NAME(), zone_name
-        )
-        multiblock = filtered_mb
-
-    # --- 3. Cell data -> point data conversion if needed ---
-    # Check all relevant scalars (velocity components + color scalar)
+    # --- 2. Determine prep flags from frame 0 ---
     needs_c2p = False
     for sname in (resolved_vx, resolved_vy, resolved_vz, resolved_color):
         if ref_block.GetPointData().GetArray(sname) is None and \
@@ -79,26 +64,10 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
             needs_c2p = True
             break
 
-    if needs_c2p:
-        converted_mb = vtk.vtkMultiBlockDataSet()
-        converted_mb.SetNumberOfBlocks(multiblock.GetNumberOfBlocks())
-        for i in range(multiblock.GetNumberOfBlocks()):
-            block = multiblock.GetBlock(i)
-            if block is None:
-                continue
-            c2p = vtk.vtkCellDataToPointData()
-            c2p.SetInputData(block)
-            c2p.Update()
-            converted_mb.SetBlock(i, c2p.GetOutput())
-            src_meta = multiblock.GetMetaData(i)
-            if src_meta and src_meta.Has(vtk.vtkCompositeDataSet.NAME()):
-                converted_mb.GetMetaData(i).Set(
-                    vtk.vtkCompositeDataSet.NAME(),
-                    src_meta.Get(vtk.vtkCompositeDataSet.NAME()),
-                )
-        multiblock = converted_mb
+    # Prepare frame 0
+    multiblock = _prepare_multiblock(multiblock, zone_name, needs_c2p)
 
-    # --- 4. Auto seed positions and propagation from bounds ---
+    # --- 3. Auto seed positions and propagation from bounds ---
     bounds = _get_global_bounds(multiblock)
     dx = bounds[1] - bounds[0]
     dy = bounds[3] - bounds[2]
@@ -111,7 +80,6 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
         seed_start = [bounds[0], bounds[2], bounds[4]]
     if seed_end is None:
         seed_end = [bounds[1], bounds[3], bounds[5]]
-    # Ensure list of floats
     seed_start = [float(v) for v in seed_start]
     seed_end = [float(v) for v in seed_end]
 
@@ -120,16 +88,26 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
         max_propagation = max(diagonal * 2.0, 1.0)
     max_propagation = float(max_propagation)
 
-    # --- 5. Build RomtekPostDataSet (data bridge) ---
+    # --- 4. Build RomtekPostDataSet (data bridge) ---
+    sequence = kwargs.get("sequence")
+    frame_count = kwargs.get("frame_count", 1)
+    time_labels = kwargs.get("time_labels", ["0"])
+
     try:
         rpdspf = vtk.RomtekPostDataSetPerFile()
-        rpdspf.AddOriginalFrame(multiblock)
+        if sequence and frame_count > 1:
+            all_mbs = sequence.load_all_multiblocks()
+            for raw_mb in all_mbs:
+                prepared = _prepare_multiblock(raw_mb, zone_name, needs_c2p)
+                rpdspf.AddOriginalFrame(prepared)
+        else:
+            rpdspf.AddOriginalFrame(multiblock)
         rpds = vtk.RomtekPostDataSet()
         rpds.AddFileData(rpdspf)
     except Exception as e:
         return {"error": f"Failed to build RomtekPostDataSet: {e}"}
 
-    # --- 6. Configure and run filter ---
+    # --- 5. Configure and run filter ---
     n_lines = int(params.get("n_lines", 100))
     seed_type = int(params.get("seed_type", 0))
     step_ratio = float(params.get("step_ratio", 1.0))
@@ -137,7 +115,7 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     try:
         filt = vtk.VectorFlowLineFilter()
         filt.SetInput(rpds)
-        filt.SetStreamerType(0)  # explicitly set to streamline mode
+        filt.SetStreamerType(0)
         filt.SetVectorScalar(resolved_vx, resolved_vy, resolved_vz)
         filt.SetAdditionalScalar(resolved_color)
         filt.SetLineStepRatio(step_ratio)
@@ -150,7 +128,7 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     except Exception as e:
         return {"error": f"VectorFlowLineFilter failed: {e}"}
 
-    # --- 7. Extract output polydata (block 0 = frame 0) ---
+    # --- 6. Extract per-frame outputs ---
     if result_mb is None or result_mb.GetNumberOfBlocks() == 0:
         return {
             "error": (
@@ -159,8 +137,9 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
             )
         }
 
-    output = result_mb.GetBlock(0)
-    if output is None or output.GetNumberOfPoints() == 0:
+    frame_outputs = _extract_frames(result_mb, frame_count, blocks_per_frame=1)
+
+    if not frame_outputs or all(o is None for o in frame_outputs):
         return {
             "error": (
                 "Streamline produced empty result. "
@@ -168,50 +147,124 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
             )
         }
 
-    n_points = output.GetNumberOfPoints()
-    n_cells = output.GetNumberOfCells()
-
-    # --- 8. Save as VTP ---
+    # --- 7. Save as VTP (per-frame) ---
     file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
     output_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
     sl_dir = os.path.join(output_dir, "Streamline")
     os.makedirs(sl_dir, exist_ok=True)
 
     seed_label = "line" if seed_type == 0 else "sphere"
-    output_path = os.path.normpath(
-        os.path.join(sl_dir, f"streamline_{seed_label}_n{n_lines}.vtp")
-    ).replace("\\", "/")
+    all_paths = _save_frames(
+        frame_outputs, sl_dir,
+        f"streamline_{seed_label}_n{n_lines}", frame_count,
+    )
 
-    writer = vtk.vtkXMLPolyDataWriter()
-    writer.SetFileName(output_path)
-    writer.SetInputData(output)
-    writer.SetDataModeToBinary()
-    writer.SetCompressorTypeToZLib()
-    writer.Write()
+    first_output = next((o for o in frame_outputs if o is not None), None)
+    n_points = first_output.GetNumberOfPoints() if first_output else 0
+    n_cells = first_output.GetNumberOfCells() if first_output else 0
 
-    # --- 9. Return ---
-    result_id = f"streamline_{id(output) % 100000:05d}"
+    # --- 8. Return ---
+    result_id = f"streamline_{id(first_output) % 100000:05d}"
     zone_label = zone_name or "all zones"
     color_label = color_param or vx_param
+    frame_info = f" ({frame_count} frames)" if frame_count > 1 else ""
     return {
         "type": "geometry",
         "summary": (
             f"Streamlines of {zone_label}: "
-            f"{n_lines} seeds ({seed_label}), {n_points} points, {n_cells} cells. "
-            f"Colored by {color_label}. Saved to {output_path}"
+            f"{n_lines} seeds ({seed_label}), {n_points} points, {n_cells} cells{frame_info}. "
+            f"Colored by {color_label}. Saved to {all_paths[0]}"
         ),
         "data": {
             "result_id": result_id,
-            "output_file": output_path,
+            "output_file": all_paths[0],
             "n_lines": n_lines,
             "n_points": n_points,
             "n_cells": n_cells,
             "seed_type": seed_label,
             "color_scalar": color_label,
+            "frame_count": frame_count,
+            "time_labels": time_labels,
+            "output_files_by_frame": all_paths,
         },
-        "output_files": [output_path],
-        "_vtk_output": output,
+        "output_files": all_paths,
+        "_vtk_output": first_output,
     }
+
+
+def _prepare_multiblock(raw_mb, zone_name, needs_c2p):
+    """Apply zone filtering and optional cell-to-point conversion."""
+    mb = raw_mb
+    if zone_name:
+        target_block = None
+        for i in range(mb.GetNumberOfBlocks()):
+            meta = mb.GetMetaData(i)
+            if meta and meta.Has(vtk.vtkCompositeDataSet.NAME()):
+                if meta.Get(vtk.vtkCompositeDataSet.NAME()) == zone_name:
+                    target_block = mb.GetBlock(i)
+                    break
+        if target_block is not None:
+            filtered_mb = vtk.vtkMultiBlockDataSet()
+            filtered_mb.SetNumberOfBlocks(1)
+            filtered_mb.SetBlock(0, target_block)
+            filtered_mb.GetMetaData(0).Set(vtk.vtkCompositeDataSet.NAME(), zone_name)
+            mb = filtered_mb
+    if needs_c2p:
+        converted_mb = vtk.vtkMultiBlockDataSet()
+        converted_mb.SetNumberOfBlocks(mb.GetNumberOfBlocks())
+        for i in range(mb.GetNumberOfBlocks()):
+            block = mb.GetBlock(i)
+            if block is None:
+                continue
+            c2p = vtk.vtkCellDataToPointData()
+            c2p.SetInputData(block)
+            c2p.Update()
+            converted_mb.SetBlock(i, c2p.GetOutput())
+            src_meta = mb.GetMetaData(i)
+            if src_meta and src_meta.Has(vtk.vtkCompositeDataSet.NAME()):
+                converted_mb.GetMetaData(i).Set(
+                    vtk.vtkCompositeDataSet.NAME(),
+                    src_meta.Get(vtk.vtkCompositeDataSet.NAME()),
+                )
+        mb = converted_mb
+    return mb
+
+
+def _extract_frames(result_mb, frame_count, blocks_per_frame=1):
+    """Extract per-frame polydata from filter output multiblock."""
+    total_blocks = result_mb.GetNumberOfBlocks()
+    outputs = []
+    for f in range(frame_count):
+        start = f * blocks_per_frame
+        if start >= total_blocks:
+            outputs.append(None)
+            continue
+        blk = result_mb.GetBlock(start)
+        if blk and blk.GetNumberOfPoints() > 0:
+            outputs.append(blk)
+        else:
+            outputs.append(None)
+    return outputs
+
+
+def _save_frames(frame_outputs, out_dir, base_name, frame_count):
+    """Save per-frame polydata as individual .vtp files. Returns list of paths."""
+    paths = []
+    for i, output in enumerate(frame_outputs):
+        if frame_count > 1:
+            fname = f"{base_name}_f{i:04d}.vtp"
+        else:
+            fname = f"{base_name}.vtp"
+        path = os.path.normpath(os.path.join(out_dir, fname)).replace("\\", "/")
+        if output is not None:
+            writer = vtk.vtkXMLPolyDataWriter()
+            writer.SetFileName(path)
+            writer.SetInputData(output)
+            writer.SetDataModeToBinary()
+            writer.SetCompressorTypeToZLib()
+            writer.Write()
+        paths.append(path)
+    return paths
 
 
 def _get_global_bounds(multiblock):

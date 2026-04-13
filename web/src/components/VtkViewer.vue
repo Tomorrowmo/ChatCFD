@@ -20,7 +20,13 @@ const props = defineProps({
   displayMode: { type: String, default: 'surface' },
   opacity: { type: Number, default: 1.0 },
   colorPreset: { type: String, default: 'jet' },
+  frame: { type: Number, default: 0 },
+  scalarRange: { type: Array, default: null },  // [min, max] global range across all frames
 })
+
+const emit = defineEmits(['loaded'])
+
+let hasLoadedOnce = false  // track first load for resetCamera
 
 const colorPresets = {
   jet:         [[0,0,0,1], [0.25,0,1,1], [0.5,0,1,0], [0.75,1,1,0], [1,1,0,0]],
@@ -64,7 +70,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.sessionId, props.zone, props.scalarName],
+  () => [props.sessionId, props.zone, props.scalarName, props.frame],
   () => {
     if (props.zone) loadData()
   }
@@ -128,8 +134,11 @@ async function loadData() {
   statusMsg.value = 'Loading 3D mesh...'
 
   try {
-    const fileParam = props.sourceFile ? `?file=${encodeURIComponent(props.sourceFile)}` : ''
-    const url = `http://localhost:8000/api/surface/${props.sessionId}/${encodeURIComponent(props.zone)}${fileParam}`
+    const params = new URLSearchParams()
+    if (props.sourceFile) params.set('file', props.sourceFile)
+    if (props.frame > 0) params.set('frame', String(props.frame))
+    const qs = params.toString() ? `?${params.toString()}` : ''
+    const url = `http://localhost:8000/api/surface/${props.sessionId}/${encodeURIComponent(props.zone)}${qs}`
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const vtpBuffer = await resp.arrayBuffer()
@@ -167,8 +176,10 @@ async function loadData() {
         useCellData = true
       }
       if (arr) {
-        const [lo, hi] = arr.getRange()
-        console.log(`[VtkViewer] Found scalar '${props.scalarName}' (${useCellData ? 'cell' : 'point'}), range=[${lo}, ${hi}]`)
+        const perFrame = arr.getRange()
+        // Use global range (consistent across all frames) if provided, else per-frame
+        const [lo, hi] = props.scalarRange || perFrame
+        console.log(`[VtkViewer] Found scalar '${props.scalarName}' (${useCellData ? 'cell' : 'point'}), range=[${lo}, ${hi}]${props.scalarRange ? ' (global)' : ' (per-frame)'}`)
 
         // Build LUT from color preset
         const ctf = vtkColorTransferFunction.newInstance()
@@ -213,20 +224,28 @@ async function loadData() {
     applyDisplayMode(actor)
     renderer.addActor(actor)
 
-    renderer.resetCamera()
+    if (!hasLoadedOnce) {
+      renderer.resetCamera()
+      hasLoadedOnce = true
+      // Re-fit camera after container layout stabilizes (panel animation)
+      setTimeout(() => {
+        if (fullScreenRenderer) {
+          fullScreenRenderer.resize()
+          renderer.resetCamera()
+          renderWindow.render()
+        }
+      }, 300)
+    } else {
+      // Keep user's camera position but update near/far clip planes for new geometry bounds
+      renderer.resetCameraClippingRange()
+    }
     renderWindow.render()
-    // Re-fit camera after container layout stabilizes (panel animation)
-    setTimeout(() => {
-      if (fullScreenRenderer) {
-        fullScreenRenderer.resize()
-        renderer.resetCamera()
-        renderWindow.render()
-      }
-    }, 300)
     statusMsg.value = ''
+    emit('loaded')
   } catch (err) {
     statusMsg.value = `Failed to load: ${err.message}`
     console.error('VtkViewer error:', err)
+    emit('loaded')  // still signal so playback doesn't hang
   }
 }
 

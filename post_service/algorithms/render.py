@@ -13,7 +13,7 @@ DEFAULTS = {
 }
 
 
-def execute(post_data, params: dict, zone_name: str) -> dict:
+def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     multiblock = post_data.get_vtk_data()
 
     # Get target data

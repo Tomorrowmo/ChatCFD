@@ -203,6 +203,9 @@ const viewerType = computed(() => {
         :sessionId="sessionId"
         :baseZone="baseZone"
         :sourceFile="activeArtifact.source_file || ''"
+        :frameFiles="activeArtifact.data?.output_files_by_frame || []"
+        :frameCount="activeArtifact.data?.frame_count || 1"
+        :timeLabels="activeArtifact.data?.time_labels || []"
       />
 
       <img
