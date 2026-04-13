@@ -332,11 +332,11 @@ function renderPolydata() {
     <div class="viewer-container" ref="containerRef">
       <div v-if="statusMsg" class="viewer-overlay">{{ statusMsg }}</div>
       <div class="viewer-hints">
-        <span class="hint-item"><kbd>L</kbd> Rotate</span>
+        <span class="hint-item">Drag: Rotate</span>
         <span class="hint-sep">|</span>
-        <span class="hint-item"><kbd>M</kbd> Pan</span>
+        <span class="hint-item">Shift+Drag: Pan</span>
         <span class="hint-sep">|</span>
-        <span class="hint-item"><kbd>&#x2191;&#x2193;</kbd> Zoom</span>
+        <span class="hint-item">Scroll: Zoom</span>
       </div>
     </div>
   </div>
