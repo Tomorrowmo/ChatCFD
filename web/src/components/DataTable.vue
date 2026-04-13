@@ -387,9 +387,7 @@ function onChartHover(e) {
   // Redraw base chart + crosshair + dot
   drawChart()
   const ctx = canvas.getContext('2d')
-  const dpr = window.devicePixelRatio || 1
-  ctx.save()
-  ctx.scale(dpr, dpr)
+  // drawChart() already applied ctx.scale(dpr) — draw directly in CSS-pixel coords
 
   // Crosshair
   ctx.strokeStyle = CHART_COLORS.crosshair
@@ -404,8 +402,6 @@ function onChartHover(e) {
   ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill()
   ctx.fillStyle = CHART_COLORS.dot
   ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill()
-
-  ctx.restore()
 
   // Position tooltip
   tooltip.value = {
