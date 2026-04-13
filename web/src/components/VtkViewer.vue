@@ -27,6 +27,7 @@ const props = defineProps({
 const emit = defineEmits(['loaded'])
 
 let hasLoadedOnce = false  // track first load for resetCamera
+let loadGeneration = 0     // monotonic counter — stale loadData() calls won't emit 'loaded'
 
 const colorPresets = {
   jet:         [[0,0,0,1], [0.25,0,1,1], [0.5,0,1,0], [0.75,1,1,0], [1,1,0,0]],
@@ -131,6 +132,7 @@ function applyDisplayMode(actor) {
 
 async function loadData() {
   if (!fullScreenRenderer) return
+  const gen = ++loadGeneration  // capture current generation
   statusMsg.value = 'Loading 3D mesh...'
 
   try {
@@ -241,11 +243,11 @@ async function loadData() {
     }
     renderWindow.render()
     statusMsg.value = ''
-    emit('loaded')
+    if (gen === loadGeneration) emit('loaded')  // only signal if this is the latest load
   } catch (err) {
     statusMsg.value = `Failed to load: ${err.message}`
     console.error('VtkViewer error:', err)
-    emit('loaded')  // still signal so playback doesn't hang
+    if (gen === loadGeneration) emit('loaded')  // still signal so playback doesn't hang
   }
 }
 

@@ -57,6 +57,10 @@ function stopPlay() {
 /** Called by parent after the frame has finished loading/rendering. */
 function frameReady() {
   if (!playing.value) return
+  // Clear any stale timer (e.g. from overlapping loadData calls) before scheduling
+  if (delayTimerId !== null) {
+    clearTimeout(delayTimerId)
+  }
   // Wait the configured delay, then advance to next frame
   delayTimerId = setTimeout(() => {
     delayTimerId = null
