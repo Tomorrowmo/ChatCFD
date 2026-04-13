@@ -8,10 +8,10 @@ import os
 import vtk
 
 NAME = "slice"
-DESCRIPTION = "Extract axis-aligned slice planes colored by a scalar. Outputs a .vtp file for 3D viewing."
+DESCRIPTION = "Extract axis-aligned slice planes. Outputs a .vtp file for 3D viewing."
 DEFAULTS = {
-    "scalar": None,      # required: scalar for coloring the slice
-    "direction": 0,      # 0=X, 1=Y, 2=Z
+    "scalar": None,      # scalar for coloring (None = auto-pick first available)
+    "direction": 0,      # 0=X, 1=Y, 2=Z (also accepts 'x','y','z')
     "n_slices": 3,       # number of slice planes
     "start": None,       # start position along axis (None = auto from bounds)
     "end": None,         # end position along axis (None = auto from bounds)
@@ -22,11 +22,10 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     multiblock = post_data.get_vtk_data()
 
     # --- 1. Validate params ---
-    scalar_name = params.get("scalar")
-    if not scalar_name:
-        return {"error": "Parameter 'scalar' is required. E.g. scalar='Pressure'"}
-
-    direction = int(params.get("direction", 0))
+    _dir_map = {"x": 0, "y": 1, "z": 2}
+    raw_dir = params.get("direction", 0)
+    direction = _dir_map.get(str(raw_dir).lower(), raw_dir) if isinstance(raw_dir, str) else raw_dir
+    direction = int(direction)
     if direction not in (0, 1, 2):
         return {"error": f"Invalid direction={direction}. Must be 0 (X), 1 (Y), or 2 (Z)."}
 
@@ -36,6 +35,16 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
 
     ref_zone = zone_name if zone_name and zone_name in zones else zones[0]
     ref_block = post_data._get_block(ref_zone)
+
+    # Scalar is optional — auto-pick first available if not specified
+    scalar_name = params.get("scalar") or params.get("scalar_name")
+    if not scalar_name:
+        available = post_data.get_scalar_names(ref_zone)
+        if available:
+            scalar_name = available[0]
+        else:
+            return {"error": "No scalars found in dataset and no 'scalar' parameter provided."}
+
     try:
         resolved_scalar = post_data._resolve_name(ref_zone, scalar_name, ref_block)
     except ValueError as e:
