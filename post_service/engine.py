@@ -8,7 +8,7 @@ import vtk
 from post_service.algorithm_registry import AlgorithmRegistry
 from post_service.archive import AnalysisArchive
 from post_service.post_data import PostData
-from post_service.session import SessionManager
+from post_service.session import FrameSequence, MultiFileFrameSequence, SessionManager
 
 
 class PostEngine:
@@ -30,54 +30,196 @@ class PostEngine:
         ".vtu": "VTKVTUReader",
         ".vtp": "VTKVTPReader",
     }
+    # Filename (no extension) → reader mapping (for formats identified by filename)
+    _FILENAME_READER_MAP = {
+        "d3plot": "VTKD3PlotReader",
+        "controlDict": "OpenFoamReader",
+    }
+
+    def _is_supported_file(self, file_path: str) -> bool:
+        """Check if a file is a supported CFD format."""
+        basename = os.path.basename(file_path)
+        filename_no_ext = os.path.splitext(basename)[0]
+        if basename in self._FILENAME_READER_MAP or filename_no_ext in self._FILENAME_READER_MAP:
+            return True
+        _, ext = os.path.splitext(file_path)
+        return ext.lower() in self._READER_MAP
+
+    def load_directory(self, session_id: str, dir_path: str) -> dict:
+        """Load all supported CFD files from a directory as a single multi-frame sequence.
+
+        Each file becomes one frame. Returns the same format as load_file() so the
+        agent/frontend treat it identically to a multi-frame single file.
+        """
+        dir_path = os.path.normpath(dir_path).replace("\\", "/")
+        if not os.path.isdir(dir_path):
+            return {"error": f"Directory not found: {dir_path}"}
+
+        # Collect supported files with reader names
+        targets = []
+        reader_names = []
+        for f in sorted(os.listdir(dir_path)):
+            full = os.path.normpath(os.path.join(dir_path, f)).replace("\\", "/")
+            if not os.path.isfile(full):
+                continue
+            basename = os.path.basename(full)
+            filename_no_ext = os.path.splitext(basename)[0]
+            rn = self._FILENAME_READER_MAP.get(basename, "") or \
+                 self._FILENAME_READER_MAP.get(filename_no_ext, "")
+            if not rn:
+                _, ext = os.path.splitext(full)
+                rn = self._READER_MAP.get(ext.lower(), "")
+            if rn:
+                targets.append(full)
+                reader_names.append(rn)
+
+        if not targets:
+            supported = list(self._READER_MAP.keys()) + list(self._FILENAME_READER_MAP.keys())
+            return {"error": f"No supported files in '{dir_path}'. Supported formats: {supported}"}
+
+        # Build multi-file frame sequence (each file = one frame)
+        sequence = MultiFileFrameSequence(targets, reader_names, dir_path)
+
+        # Load frame 0 for immediate use
+        try:
+            frame0 = sequence.get_frame(0)
+        except Exception as e:
+            return {"error": f"Failed to read first file: {e}"}
+
+        # Start background preload
+        if sequence.frame_count > 1:
+            sequence.start_preload()
+
+        # Register in session
+        state = self.session_mgr.get(session_id)
+        if state is None:
+            state = self.session_mgr.create(session_id)
+        state.post_data = frame0
+        state._sequence_map[dir_path] = sequence
+        state.output_dir = dir_path
+
+        # Return single-file compatible summary
+        summary = frame0.get_summary()
+        summary["file_path"] = dir_path
+        summary["frame_count"] = sequence.frame_count
+        summary["time_labels"] = sequence.time_labels
+        print(f"[Engine.load_directory] {dir_path}: {sequence.frame_count} files as frames")
+        return summary
 
     def load_file(self, session_id: str, file_path: str) -> dict:
         file_path = os.path.normpath(file_path).replace("\\", "/")
+
+        # If path is a directory, load all supported files within it
+        if os.path.isdir(file_path):
+            return self.load_directory(session_id, file_path)
+
         if not os.path.exists(file_path):
             return {"error": f"File not found: {file_path}"}
 
-        # Auto-detect reader from extension
-        _, ext = os.path.splitext(file_path)
-        ext = ext.lower()
-        reader_name = self._READER_MAP.get(ext, "")
+        # Auto-detect reader: check filename first, then extension
+        basename = os.path.basename(file_path)
+        filename_no_ext = os.path.splitext(basename)[0]
+        reader_name = self._FILENAME_READER_MAP.get(basename, "") or \
+                      self._FILENAME_READER_MAP.get(filename_no_ext, "")
         if not reader_name:
-            supported = list(self._READER_MAP.keys())
-            return {"error": f"Unsupported format: {ext}. Supported: {supported}"}
+            _, ext = os.path.splitext(file_path)
+            ext = ext.lower()
+            reader_name = self._READER_MAP.get(ext, "")
+        if not reader_name:
+            supported = list(self._READER_MAP.keys()) + list(self._FILENAME_READER_MAP.keys())
+            return {"error": f"Unsupported format: '{basename}'. Supported: {supported}"}
 
         try:
             reader = vtk.vtkRomtekIODriver()
-            reader.ReadFiles([file_path], reader_name, False)  # list, not string!
+            reader.ReadFiles([file_path], reader_name, False)
             multiblock = reader.getOutPut()
             if multiblock is None:
                 return {"error": f"Reader returned no data for: {file_path}"}
         except Exception as e:
             return {"error": f"Failed to read file: {e}"}
-        post_data = PostData(multiblock, file_path)
+
+        # Multi-frame support: detect time steps
+        time_count = 1
+        time_labels = ["0"]
+        try:
+            tc = reader.getTimeCount()
+            if tc > 0:
+                time_count = tc
+            if time_count > 1:
+                try:
+                    tl = reader.getTimeLables()
+                    time_labels = list(tl) if tl else [str(i) for i in range(time_count)]
+                except Exception:
+                    time_labels = [str(i) for i in range(time_count)]
+                # Pad if length mismatch
+                if len(time_labels) != time_count:
+                    time_labels = [
+                        time_labels[i] if i < len(time_labels) else str(i)
+                        for i in range(time_count)
+                    ]
+        except Exception:
+            pass  # reader doesn't support getTimeCount — single frame
+
+        # Create FrameSequence (lazy — reader kept alive, frames loaded on demand)
+        sequence = FrameSequence(reader, file_path, time_count, time_labels)
+
+        # Load frame 0 for immediate use
+        frame0 = sequence.get_frame(0)
+
+        # Start background preload for multi-frame files (fills PostData cache + scalar ranges)
+        if time_count > 1:
+            sequence.start_preload()
+
         state = self.session_mgr.get(session_id)
         if state is None:
             state = self.session_mgr.create(session_id)
-        state.post_data = post_data
-        state.output_dir = os.path.dirname(file_path)
-        summary = post_data.get_summary()
+        state.post_data = frame0
+        state._sequence_map[file_path] = sequence
+
+        file_stem = os.path.splitext(os.path.basename(file_path))[0]
+        state.output_dir = os.path.join(os.path.dirname(file_path), file_stem)
+        summary = frame0.get_summary()
+        summary["frame_count"] = time_count
+        summary["time_labels"] = time_labels
         archive_info = AnalysisArchive.check_consistency(file_path)
         summary["archive"] = archive_info
+        print(f"[Engine.load_file] Loaded {file_path}: {time_count} frames")
         return summary
 
     def calculate(self, session_id: str, method: str, params: dict, zone_name: str) -> dict:
+        import traceback
+        print(f"[Engine.calculate] method={method}, params={params}, zone_name={zone_name}, session_id={session_id}")
         state = self.session_mgr.get(session_id)
         if state is None:
+            print(f"[Engine.calculate] ERROR: Session '{session_id}' not found")
             return {"error": "Session not found. Please load a file first."}
         if state.post_data is None:
+            print(f"[Engine.calculate] ERROR: No file loaded in session '{session_id}'")
             return {"error": "No file loaded. Please use loadFile first."}
         entry = self.registry.get(method)
         if entry is None:
             available = [m["name"] for m in self.registry.list_methods()]
+            print(f"[Engine.calculate] ERROR: Unknown method '{method}'. Available: {available}")
             return {"error": f"Unknown method '{method}'. Available: {available}"}
         merged = {**entry["defaults"], **params}
+        print(f"[Engine.calculate] merged params: {merged}")
         try:
-            result = entry["execute"](state.post_data, merged, zone_name or "")
+            # Pass sequence + frame_count as kwargs for multi-frame algorithms
+            sequence = state.get_sequence(state._active_file)
+            frame_count = sequence.frame_count if sequence else 1
+            time_labels = sequence.time_labels if sequence else ["0"]
+            result = entry["execute"](
+                state.post_data, merged, zone_name or "",
+                sequence=sequence, frame_count=frame_count, time_labels=time_labels,
+            )
         except Exception as e:
+            traceback.print_exc()
             return {"error": f"Calculation failed: {e}"}
+
+        if isinstance(result, dict) and result.get("error"):
+            print(f"[Engine.calculate] Algorithm returned error: {result['error']}")
+        else:
+            print(f"[Engine.calculate] Success: type={result.get('type')}, summary={str(result.get('summary', ''))[:100]}")
 
         # Auto-store geometry results in session for HTTP API access
         if isinstance(result, dict) and result.get("type") == "geometry":

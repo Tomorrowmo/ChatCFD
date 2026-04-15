@@ -53,7 +53,7 @@ def _merge_all_blocks(multiblock: vtk.vtkMultiBlockDataSet):
 # Execute
 # ---------------------------------------------------------------------------
 
-def execute(post_data, params: dict, zone_name: str) -> dict:
+def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     multiblock = post_data.get_vtk_data()
 
     # Select zone or merge all

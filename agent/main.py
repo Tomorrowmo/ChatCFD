@@ -21,7 +21,7 @@ os.environ.setdefault("no_proxy", "127.0.0.1,localhost")
 
 MODEL = os.environ.get("MODEL_ID", "qwen/qwen-plus")
 MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000/mcp/sse")
-MEMPALACE_ENABLED = os.environ.get("MEMPALACE_ENABLED", "false").lower() == "true"
+MEMPALACE_ENABLED = os.environ.get("MEMPALACE_ENABLED", "true").lower() == "true"
 LOG_DIR = os.environ.get("LOG_DIR", ".chatcfd")
 AGENT_PORT = int(os.environ.get("AGENT_PORT", "8080"))
 

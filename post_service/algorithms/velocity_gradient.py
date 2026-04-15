@@ -78,7 +78,7 @@ def _compute_single(point_set, params: dict):
     return calc.getOutput()
 
 
-def execute(post_data, params: dict, zone_name: str) -> dict:
+def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     multiblock = post_data.get_vtk_data()
     n = multiblock.GetNumberOfBlocks()
 
@@ -115,7 +115,8 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
             multiblock.SetBlock(i, block)
 
     # Write output VTM file
-    file_dir = os.path.dirname(post_data.file_path)
+    file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
+    file_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
     out_dir = os.path.normpath(os.path.join(file_dir, "VelocityGradient")).replace("\\", "/")
     os.makedirs(out_dir, exist_ok=True)
     out_path = out_dir + "/res.vtm"

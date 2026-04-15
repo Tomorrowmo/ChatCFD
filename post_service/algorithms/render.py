@@ -13,7 +13,7 @@ DEFAULTS = {
 }
 
 
-def execute(post_data, params: dict, zone_name: str) -> dict:
+def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     multiblock = post_data.get_vtk_data()
 
     # Get target data
@@ -109,7 +109,8 @@ def execute(post_data, params: dict, zone_name: str) -> dict:
     w2i.Update()
 
     # Save PNG
-    output_dir = os.path.dirname(post_data.file_path)
+    file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
+    output_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
     render_dir = os.path.join(output_dir, "Render")
     os.makedirs(render_dir, exist_ok=True)
 

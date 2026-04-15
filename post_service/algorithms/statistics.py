@@ -7,7 +7,7 @@ DEFAULTS = {
 }
 
 
-def execute(post_data, params: dict, zone_name: str) -> dict:
+def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     scalars = params.get("scalars")
     if not scalars:
         scalars = post_data.get_scalar_names(zone_name)

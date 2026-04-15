@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useApi } from '../composables/useApi.js'
 
 const props = defineProps({
@@ -17,16 +17,50 @@ const mode = ref('table')
 const chartX = ref('')
 const chartY = ref('')
 
-const chartW = 800
-const chartH = 500
-const marginLeft = 60
-const marginBottom = 40
-const marginTop = 20
-const marginRight = 20
-const plotW = chartW - marginLeft - marginRight
-const plotH = chartH - marginTop - marginBottom
-
 const api = useApi()
+
+// --- Virtual scroll state ---
+const ROW_HEIGHT = 33
+const BUFFER = 10
+const scrollRef = ref(null)
+const scrollTop = ref(0)
+const viewportH = ref(400)
+
+const totalHeight = computed(() => rows.value.length * ROW_HEIGHT)
+
+const visibleRange = computed(() => {
+  const start = Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - BUFFER)
+  const visibleCount = Math.ceil(viewportH.value / ROW_HEIGHT) + 2 * BUFFER
+  const end = Math.min(rows.value.length, start + visibleCount)
+  return { start, end }
+})
+
+const visibleRows = computed(() => {
+  const { start, end } = visibleRange.value
+  return rows.value.slice(start, end).map((row, i) => ({ row, idx: start + i }))
+})
+
+const offsetY = computed(() => visibleRange.value.start * ROW_HEIGHT)
+
+function onScroll(e) {
+  scrollTop.value = e.target.scrollTop
+}
+
+let resizeObserver = null
+// Watch scrollRef itself — fires when the v-else-if branch creates/destroys the element.
+// flush:'post' ensures the DOM is updated before we measure.
+watch(scrollRef, (el) => {
+  resizeObserver?.disconnect()
+  if (el) {
+    scrollTop.value = el.scrollTop   // sync — new element starts at 0
+    viewportH.value = el.clientHeight
+    resizeObserver = new ResizeObserver(([entry]) => {
+      viewportH.value = entry.contentRect.height
+    })
+    resizeObserver.observe(el)
+  }
+}, { flush: 'post' })
+onBeforeUnmount(() => { resizeObserver?.disconnect() })
 
 watch(
   () => props.path,
@@ -34,14 +68,12 @@ watch(
     if (!newPath) return
     loading.value = true
     error.value = null
-
     try {
       const blob = await api.downloadFile(newPath)
       const text = await blob.text()
       parseCSV(text)
     } catch (err) {
       error.value = `Failed to load CSV: ${err.message}`
-      // Use demo data for mock mode
       parseCSV(
         'Zone,Pressure_avg,Pressure_max,Velocity_avg\ninlet,101325.0,101400.5,12.34\noutlet,100800.2,100950.0,15.67\nwall,101100.8,101325.0,0.00'
       )
@@ -63,9 +95,10 @@ watch(headers, (h) => {
 function parseCSV(text) {
   const lines = text.trim().split('\n')
   if (lines.length < 1) return
-
   headers.value = lines[0].split(',').map((h) => h.trim())
   rows.value = lines.slice(1).map((line) => line.split(',').map((c) => c.trim()))
+  scrollTop.value = 0
+  if (scrollRef.value) scrollRef.value.scrollTop = 0
 }
 
 function toggleSort(colIdx) {
@@ -75,19 +108,10 @@ function toggleSort(colIdx) {
     sortCol.value = colIdx
     sortAsc.value = true
   }
-
   rows.value.sort((a, b) => {
-    const va = a[colIdx]
-    const vb = b[colIdx]
-    const na = parseFloat(va)
-    const nb = parseFloat(vb)
-
-    let cmp
-    if (!isNaN(na) && !isNaN(nb)) {
-      cmp = na - nb
-    } else {
-      cmp = va.localeCompare(vb)
-    }
+    const va = a[colIdx], vb = b[colIdx]
+    const na = parseFloat(va), nb = parseFloat(vb)
+    const cmp = (!isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb)
     return sortAsc.value ? cmp : -cmp
   })
 }
@@ -97,69 +121,384 @@ function sortIndicator(colIdx) {
   return sortAsc.value ? ' \u25B2' : ' \u25BC'
 }
 
-// --- Chart computations ---
-const chartData = computed(() => {
-  if (!chartX.value || !chartY.value) return null
-  const xi = headers.value.indexOf(chartX.value)
-  const yi = headers.value.indexOf(chartY.value)
-  if (xi < 0 || yi < 0) return null
+// ─── Canvas chart ───
+const canvasRef = ref(null)
+const tooltipRef = ref(null)
+const tooltip = ref({ show: false, x: 0, y: 0, xVal: '', yVal: '' })
+const chartViewRange = ref(null)  // {xLo,xHi,yLo,yHi} or null = fit all
+const isZoomed = computed(() => chartViewRange.value !== null)
+let chartState = null      // cached geometry for hover lookup
+let chartResizeObs = null
 
-  const points = []
-  for (const row of rows.value) {
-    const x = parseFloat(row[xi])
-    const y = parseFloat(row[yi])
-    if (!isNaN(x) && !isNaN(y)) {
-      points.push({ x, y })
+const CHART_COLORS = {
+  line: '#4f8ff7',
+  dot: '#4f8ff7',
+  gradientTop: 'rgba(79,143,247,0.25)',
+  gradientBot: 'rgba(79,143,247,0.02)',
+  grid: 'rgba(128,128,128,0.15)',
+  axis: 'rgba(128,128,128,0.5)',
+  tick: 'rgba(180,180,180,0.9)',
+  crosshair: 'rgba(79,143,247,0.4)',
+}
+
+// LTTB downsampling: keeps visual shape with far fewer points
+function lttb(data, threshold) {
+  const len = data.length
+  if (len <= threshold) return data
+  const result = [data[0]]
+  const bucketSize = (len - 2) / (threshold - 2)
+  let prev = 0
+  for (let i = 0; i < threshold - 2; i++) {
+    const rStart = Math.floor((i + 1) * bucketSize) + 1
+    const rEnd = Math.min(Math.floor((i + 2) * bucketSize) + 1, len)
+    // Average of next bucket
+    const nStart = Math.floor((i + 2) * bucketSize) + 1
+    const nEnd = Math.min(Math.floor((i + 3) * bucketSize) + 1, len)
+    let avgX = 0, avgY = 0, cnt = 0
+    for (let j = nStart; j < nEnd; j++) { avgX += data[j].x; avgY += data[j].y; cnt++ }
+    if (cnt > 0) { avgX /= cnt; avgY /= cnt }
+    else { avgX = data[len - 1].x; avgY = data[len - 1].y }
+    // Largest triangle in current bucket
+    let maxArea = -1, maxIdx = rStart
+    const pA = data[prev]
+    for (let j = rStart; j < rEnd; j++) {
+      const area = Math.abs((pA.x - avgX) * (data[j].y - pA.y) - (pA.x - data[j].x) * (avgY - pA.y))
+      if (area > maxArea) { maxArea = area; maxIdx = j }
     }
+    result.push(data[maxIdx])
+    prev = maxIdx
   }
-  if (points.length === 0) return null
+  result.push(data[len - 1])
+  return result
+}
 
-  // Sort by x for connected line
-  points.sort((a, b) => a.x - b.x)
-
-  const xMin = Math.min(...points.map((p) => p.x))
-  const xMax = Math.max(...points.map((p) => p.x))
-  const yMin = Math.min(...points.map((p) => p.y))
-  const yMax = Math.max(...points.map((p) => p.y))
-
-  // Add padding to range
-  const xRange = xMax - xMin || 1
-  const yRange = yMax - yMin || 1
-  const xLo = xMin - xRange * 0.05
-  const xHi = xMax + xRange * 0.05
-  const yLo = yMin - yRange * 0.05
-  const yHi = yMax + yRange * 0.05
-
-  function scaleX(v) {
-    return marginLeft + ((v - xLo) / (xHi - xLo)) * plotW
-  }
-  function scaleY(v) {
-    return marginTop + plotH - ((v - yLo) / (yHi - yLo)) * plotH
-  }
-
-  const scaled = points.map((p) => ({ sx: scaleX(p.x), sy: scaleY(p.y), ...p }))
-  const polyline = scaled.map((p) => `${p.sx},${p.sy}`).join(' ')
-
-  // Ticks
-  const xTicks = []
-  const yTicks = []
-  for (let i = 0; i < 5; i++) {
-    const xv = xLo + ((xHi - xLo) * i) / 4
-    xTicks.push({ v: formatTick(xv), px: scaleX(xv) })
-    const yv = yLo + ((yHi - yLo) * i) / 4
-    yTicks.push({ v: formatTick(yv), px: scaleY(yv) })
-  }
-
-  return { scaled, polyline, xTicks, yTicks }
-})
+function niceTickValues(lo, hi, maxTicks = 6) {
+  const range = hi - lo
+  if (range === 0) return [lo]
+  const rough = range / (maxTicks - 1)
+  const mag = Math.pow(10, Math.floor(Math.log10(rough)))
+  const norm = rough / mag
+  let step
+  if (norm <= 1.5) step = 1 * mag
+  else if (norm <= 3) step = 2 * mag
+  else if (norm <= 7) step = 5 * mag
+  else step = 10 * mag
+  const start = Math.ceil(lo / step) * step
+  const ticks = []
+  for (let v = start; v <= hi + step * 0.01; v += step) ticks.push(v)
+  return ticks
+}
 
 function formatTick(v) {
-  if (Math.abs(v) >= 1e6 || (Math.abs(v) < 0.01 && v !== 0)) {
-    return v.toExponential(1)
-  }
-  // Up to 3 decimal places, strip trailing zeros
-  return parseFloat(v.toFixed(3)).toString()
+  if (v === 0) return '0'
+  if (Math.abs(v) >= 1e6 || (Math.abs(v) < 0.01 && v !== 0)) return v.toExponential(1)
+  return parseFloat(v.toPrecision(6)).toString()
 }
+
+function drawChart() {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const rect = canvas.parentElement.getBoundingClientRect()
+  const W = Math.floor(rect.width) || 800
+  const H = Math.floor(rect.height) || 500
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = W * dpr
+  canvas.height = H * dpr
+  canvas.style.width = W + 'px'
+  canvas.style.height = H + 'px'
+  const ctx = canvas.getContext('2d')
+  ctx.scale(dpr, dpr)
+
+  const xi = headers.value.indexOf(chartX.value)
+  const yi = headers.value.indexOf(chartY.value)
+  if (xi < 0 || yi < 0) {
+    chartState = null
+    ctx.fillStyle = 'rgba(128,128,128,0.5)'
+    ctx.font = '14px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('Select numeric columns for X and Y axes', W / 2, H / 2)
+    return
+  }
+
+  // Parse points
+  const allPoints = []
+  for (const row of rows.value) {
+    const x = parseFloat(row[xi]), y = parseFloat(row[yi])
+    if (!isNaN(x) && !isNaN(y)) allPoints.push({ x, y })
+  }
+  if (allPoints.length === 0) {
+    chartState = null
+    ctx.fillStyle = 'rgba(128,128,128,0.5)'
+    ctx.font = '14px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('No numeric data for selected columns', W / 2, H / 2)
+    return
+  }
+  allPoints.sort((a, b) => a.x - b.x)
+
+  // Compute data range (safe for huge arrays — no spread operator)
+  let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity
+  for (const p of allPoints) {
+    if (p.x < xMin) xMin = p.x; if (p.x > xMax) xMax = p.x
+    if (p.y < yMin) yMin = p.y; if (p.y > yMax) yMax = p.y
+  }
+
+  let xLo, xHi, yLo, yHi
+  if (chartViewRange.value) {
+    ;({ xLo, xHi, yLo, yHi } = chartViewRange.value)
+  } else {
+    const xPad = (xMax - xMin || 1) * 0.05
+    const yPad = (yMax - yMin || 1) * 0.05
+    xLo = xMin - xPad; xHi = xMax + xPad
+    yLo = yMin - yPad; yHi = yMax + yPad
+  }
+
+  // Layout
+  const ml = 65, mr = 20, mt = 20, mb = 50
+  const pw = W - ml - mr, ph = H - mt - mb
+  const sx = v => ml + (v - xLo) / (xHi - xLo) * pw
+  const sy = v => mt + ph - (v - yLo) / (yHi - yLo) * ph
+
+  // Filter to visible x-range (with 1 extra point each side for edge continuity)
+  let visStart = 0, visEnd = allPoints.length
+  if (chartViewRange.value) {
+    visStart = allPoints.findIndex(p => p.x >= xLo)
+    if (visStart < 0) visStart = allPoints.length
+    if (visStart > 0) visStart--  // include one point before for line continuity
+    visEnd = allPoints.findIndex(p => p.x > xHi)
+    if (visEnd < 0) visEnd = allPoints.length
+    if (visEnd < allPoints.length) visEnd++  // include one point after
+  }
+  const visPts = allPoints.slice(visStart, visEnd)
+
+  // Downsample for rendering
+  const maxPts = Math.min(2000, pw * 2)
+  const displayPts = lttb(visPts.length > 0 ? visPts : allPoints, maxPts)
+
+  // Cache for hover
+  chartState = { allPoints, sx, sy, xLo, xHi, yLo, yHi, ml, mr, mt, mb, pw, ph, W, H }
+
+  // Clear
+  ctx.clearRect(0, 0, W, H)
+
+  // Grid lines
+  const xTicks = niceTickValues(xLo, xHi)
+  const yTicks = niceTickValues(yLo, yHi)
+  ctx.strokeStyle = CHART_COLORS.grid
+  ctx.lineWidth = 1
+  ctx.setLineDash([4, 4])
+  for (const v of yTicks) {
+    const py = sy(v)
+    ctx.beginPath(); ctx.moveTo(ml, py); ctx.lineTo(ml + pw, py); ctx.stroke()
+  }
+  for (const v of xTicks) {
+    const px = sx(v)
+    ctx.beginPath(); ctx.moveTo(px, mt); ctx.lineTo(px, mt + ph); ctx.stroke()
+  }
+  ctx.setLineDash([])
+
+  // Axes
+  ctx.strokeStyle = CHART_COLORS.axis
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(ml, mt); ctx.lineTo(ml, mt + ph); ctx.lineTo(ml + pw, mt + ph)
+  ctx.stroke()
+
+  // Tick labels
+  ctx.fillStyle = CHART_COLORS.tick
+  ctx.font = '11px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'top'
+  for (const v of xTicks) {
+    const px = sx(v)
+    ctx.beginPath(); ctx.moveTo(px, mt + ph); ctx.lineTo(px, mt + ph + 5); ctx.stroke()
+    ctx.fillText(formatTick(v), px, mt + ph + 8)
+  }
+  ctx.textAlign = 'right'
+  ctx.textBaseline = 'middle'
+  for (const v of yTicks) {
+    const py = sy(v)
+    ctx.beginPath(); ctx.moveTo(ml - 5, py); ctx.lineTo(ml, py); ctx.stroke()
+    ctx.fillText(formatTick(v), ml - 8, py)
+  }
+
+  // Axis labels
+  ctx.fillStyle = 'rgba(160,160,170,0.9)'
+  ctx.font = '12px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'top'
+  ctx.fillText(chartX.value, ml + pw / 2, H - 14)
+  ctx.save()
+  ctx.translate(16, mt + ph / 2)
+  ctx.rotate(-Math.PI / 2)
+  ctx.textBaseline = 'middle'
+  ctx.fillText(chartY.value, 0, 0)
+  ctx.restore()
+
+  // Area fill gradient
+  const grad = ctx.createLinearGradient(0, mt, 0, mt + ph)
+  grad.addColorStop(0, CHART_COLORS.gradientTop)
+  grad.addColorStop(1, CHART_COLORS.gradientBot)
+  ctx.fillStyle = grad
+  ctx.beginPath()
+  ctx.moveTo(sx(displayPts[0].x), mt + ph) // bottom-left
+  for (const p of displayPts) ctx.lineTo(sx(p.x), sy(p.y))
+  ctx.lineTo(sx(displayPts[displayPts.length - 1].x), mt + ph) // bottom-right
+  ctx.closePath()
+  ctx.fill()
+
+  // Line
+  ctx.strokeStyle = CHART_COLORS.line
+  ctx.lineWidth = 1.8
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  for (let i = 0; i < displayPts.length; i++) {
+    const px = sx(displayPts[i].x), py = sy(displayPts[i].y)
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+  }
+  ctx.stroke()
+
+  // Dots only if few points
+  if (displayPts.length <= 200) {
+    ctx.fillStyle = CHART_COLORS.dot
+    for (const p of displayPts) {
+      const px = sx(p.x), py = sy(p.y)
+      ctx.beginPath(); ctx.arc(px, py, 2.5, 0, Math.PI * 2); ctx.fill()
+    }
+  }
+
+  // Point count badge
+  if (allPoints.length > maxPts) {
+    ctx.fillStyle = 'rgba(128,128,128,0.4)'
+    ctx.font = '10px sans-serif'
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'top'
+    ctx.fillText(`${allPoints.length.toLocaleString()} pts (LTTB → ${displayPts.length})`, W - mr, 6)
+  }
+}
+
+function onChartHover(e) {
+  if (!chartState) { tooltip.value.show = false; return }
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const mx = e.clientX - rect.left
+  const my = e.clientY - rect.top
+  const { allPoints, sx, sy, ml, mt, pw, ph } = chartState
+
+  // Outside plot area?
+  if (mx < ml || mx > ml + pw || my < mt || my > mt + ph) {
+    tooltip.value.show = false
+    drawChart()  // redraw to clear crosshair
+    return
+  }
+
+  // Binary search for closest x
+  const xVal = chartState.xLo + (mx - ml) / pw * (chartState.xHi - chartState.xLo)
+  let lo = 0, hi = allPoints.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (allPoints[mid].x < xVal) lo = mid + 1; else hi = mid
+  }
+  // Check neighbors
+  let best = lo
+  if (lo > 0 && Math.abs(allPoints[lo - 1].x - xVal) < Math.abs(allPoints[lo].x - xVal)) best = lo - 1
+
+  const pt = allPoints[best]
+  const px = sx(pt.x), py = sy(pt.y)
+
+  // Redraw base chart + crosshair + dot
+  drawChart()
+  const ctx = canvas.getContext('2d')
+  // drawChart() already applied ctx.scale(dpr) — draw directly in CSS-pixel coords
+
+  // Crosshair
+  ctx.strokeStyle = CHART_COLORS.crosshair
+  ctx.lineWidth = 1
+  ctx.setLineDash([3, 3])
+  ctx.beginPath(); ctx.moveTo(px, mt); ctx.lineTo(px, mt + ph); ctx.stroke()
+  ctx.beginPath(); ctx.moveTo(ml, py); ctx.lineTo(ml + pw, py); ctx.stroke()
+  ctx.setLineDash([])
+
+  // Highlight dot
+  ctx.fillStyle = '#fff'
+  ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill()
+  ctx.fillStyle = CHART_COLORS.dot
+  ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fill()
+
+  // Position tooltip
+  tooltip.value = {
+    show: true,
+    x: Math.min(px + 12, chartState.W - 140),
+    y: Math.max(py - 40, 4),
+    xVal: `${chartX.value}: ${formatTick(pt.x)}`,
+    yVal: `${chartY.value}: ${formatTick(pt.y)}`,
+  }
+}
+
+function onChartWheel(e) {
+  e.preventDefault()
+  if (!chartState) return
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const mx = e.clientX - rect.left
+  const my = e.clientY - rect.top
+  const { ml, mt, pw, ph, xLo, xHi, yLo, yHi } = chartState
+
+  // Only zoom when cursor is inside plot area
+  if (mx < ml || mx > ml + pw || my < mt || my > mt + ph) return
+
+  // Zoom factor: scroll up = zoom in, scroll down = zoom out
+  const factor = e.deltaY > 0 ? 1.2 : 1 / 1.2
+
+  // Cursor position in data coordinates
+  const xFrac = (mx - ml) / pw
+  const yFrac = 1 - (my - mt) / ph   // canvas y is inverted
+  const cx = xLo + xFrac * (xHi - xLo)
+  const cy = yLo + yFrac * (yHi - yLo)
+
+  // Scale ranges centered on cursor position
+  const newXLo = cx - (cx - xLo) * factor
+  const newXHi = cx + (xHi - cx) * factor
+  const newYLo = cy - (cy - yLo) * factor
+  const newYHi = cy + (yHi - cy) * factor
+
+  chartViewRange.value = { xLo: newXLo, xHi: newXHi, yLo: newYLo, yHi: newYHi }
+  drawChart()
+}
+
+function resetChartZoom() {
+  chartViewRange.value = null
+  tooltip.value.show = false
+  drawChart()
+}
+
+function onChartLeave() {
+  tooltip.value.show = false
+  drawChart()
+}
+
+// Redraw on data/column change; reset zoom when data changes
+watch([chartX, chartY, rows], () => {
+  chartViewRange.value = null
+})
+watch([chartX, chartY, rows, mode], () => {
+  if (mode.value === 'chart') nextTick(drawChart)
+})
+
+// Handle resize
+onMounted(() => {
+  const container = canvasRef.value?.parentElement
+  if (container) {
+    chartResizeObs = new ResizeObserver(() => {
+      if (mode.value === 'chart') drawChart()
+    })
+    chartResizeObs.observe(container)
+  }
+})
+onBeforeUnmount(() => { chartResizeObs?.disconnect() })
 </script>
 
 <template>
@@ -175,90 +514,51 @@ function formatTick(v) {
           <option v-for="h in headers" :key="h" :value="h">{{ h }}</option>
         </select></label>
       </template>
+      <span v-if="mode === 'table' && rows.length" class="row-count">{{ rows.length.toLocaleString() }} rows</span>
     </div>
 
     <div v-if="loading" class="table-status">Loading...</div>
     <div v-else-if="error" class="table-status error">{{ error }}</div>
 
-    <div v-else-if="mode === 'table'" class="table-scroll">
-      <table class="data-table">
+    <div v-else-if="mode === 'table'" ref="scrollRef" class="table-scroll" @scroll="onScroll">
+      <table class="data-table data-table-header">
         <thead>
           <tr>
-            <th
-              v-for="(h, idx) in headers"
-              :key="idx"
-              @click="toggleSort(idx)"
-              class="sortable"
-            >
+            <th v-for="(h, idx) in headers" :key="idx" @click="toggleSort(idx)" class="sortable">
               {{ h }}{{ sortIndicator(idx) }}
             </th>
           </tr>
         </thead>
-        <tbody>
-          <tr v-for="(row, ridx) in rows" :key="ridx">
-            <td v-for="(cell, cidx) in row" :key="cidx" class="mono">
-              {{ cell }}
-            </td>
-          </tr>
-        </tbody>
       </table>
+      <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+        <table class="data-table data-table-body" :style="{ transform: `translateY(${offsetY}px)` }">
+          <tbody>
+            <tr v-for="item in visibleRows" :key="item.idx">
+              <td v-for="(cell, cidx) in item.row" :key="cidx" class="mono">{{ cell }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div v-else-if="mode === 'chart'" class="chart-container">
-      <div v-if="!chartData" class="table-status">
-        Select numeric columns for X and Y axes
+      <canvas
+        ref="canvasRef"
+        class="chart-canvas"
+        @mousemove="onChartHover"
+        @mouseleave="onChartLeave"
+        @wheel.prevent="onChartWheel"
+        @dblclick="resetChartZoom"
+      />
+      <button v-if="isZoomed" class="zoom-reset-btn" @click="resetChartZoom" title="Reset zoom (or double-click chart)">Reset</button>
+      <div
+        v-if="tooltip.show"
+        class="chart-tooltip"
+        :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
+      >
+        <div class="tt-row">{{ tooltip.xVal }}</div>
+        <div class="tt-row tt-y">{{ tooltip.yVal }}</div>
       </div>
-      <svg v-else class="chart-svg" :viewBox="`0 0 ${chartW} ${chartH}`" preserveAspectRatio="xMidYMid meet">
-        <!-- X axis -->
-        <line
-          :x1="marginLeft" :y1="marginTop + plotH"
-          :x2="marginLeft + plotW" :y2="marginTop + plotH"
-          stroke="var(--text-muted)" stroke-width="1"
-        />
-        <!-- Y axis -->
-        <line
-          :x1="marginLeft" :y1="marginTop"
-          :x2="marginLeft" :y2="marginTop + plotH"
-          stroke="var(--text-muted)" stroke-width="1"
-        />
-
-        <!-- X tick labels -->
-        <template v-for="(t, i) in chartData.xTicks" :key="'xt' + i">
-          <line :x1="t.px" :y1="marginTop + plotH" :x2="t.px" :y2="marginTop + plotH + 5"
-                stroke="var(--text-muted)" stroke-width="1"/>
-          <text :x="t.px" :y="marginTop + plotH + 20"
-                text-anchor="middle" fill="var(--text-secondary)" font-size="11">{{ t.v }}</text>
-        </template>
-
-        <!-- Y tick labels -->
-        <template v-for="(t, i) in chartData.yTicks" :key="'yt' + i">
-          <line :x1="marginLeft - 5" :y1="t.px" :x2="marginLeft" :y2="t.px"
-                stroke="var(--text-muted)" stroke-width="1"/>
-          <text :x="marginLeft - 8" :y="t.px + 4"
-                text-anchor="end" fill="var(--text-secondary)" font-size="11">{{ t.v }}</text>
-        </template>
-
-        <!-- Axis labels -->
-        <text :x="marginLeft + plotW / 2" :y="chartH - 2"
-              text-anchor="middle" fill="var(--text-secondary)" font-size="12" font-weight="500">{{ chartX }}</text>
-        <text :x="14" :y="marginTop + plotH / 2"
-              text-anchor="middle" fill="var(--text-secondary)" font-size="12" font-weight="500"
-              :transform="`rotate(-90, 14, ${marginTop + plotH / 2})`">{{ chartY }}</text>
-
-        <!-- Line connecting points -->
-        <polyline
-          :points="chartData.polyline"
-          fill="none" stroke="var(--accent)" stroke-width="1.5"
-          stroke-linejoin="round" stroke-linecap="round"
-        />
-
-        <!-- Data points -->
-        <circle
-          v-for="(p, i) in chartData.scaled" :key="'p' + i"
-          :cx="p.sx" :cy="p.sy" r="3"
-          fill="var(--accent)" stroke="#fff" stroke-width="1"
-        />
-      </svg>
     </div>
   </div>
 </template>
@@ -283,7 +583,6 @@ function formatTick(v) {
   flex-shrink: 0;
   flex-wrap: wrap;
 }
-
 .mode-bar button {
   padding: 4px 12px;
   border: 1px solid var(--border);
@@ -295,104 +594,79 @@ function formatTick(v) {
   cursor: pointer;
   transition: background 0.1s, color 0.1s;
 }
-
-.mode-bar button:hover {
-  background: var(--bg-hover);
-}
-
-.mode-bar button.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
+.mode-bar button:hover { background: var(--bg-hover); }
+.mode-bar button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .mode-bar label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 6px;
+  font-size: 12px; color: var(--text-secondary);
+  display: flex; align-items: center; gap: 4px; margin-left: 6px;
 }
-
 .mode-bar select {
-  padding: 3px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-input);
-  color: var(--text-primary);
-  font-size: 12px;
-  max-width: 140px;
+  padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-input); color: var(--text-primary); font-size: 12px; max-width: 140px;
+}
+.row-count {
+  margin-left: auto; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums;
 }
 
-.table-status {
-  padding: 40px;
-  text-align: center;
-  color: var(--text-muted);
-}
+.table-status { padding: 40px; text-align: center; color: var(--text-muted); }
+.table-status.error { color: var(--error); }
 
-.table-status.error {
-  color: var(--error);
-}
-
-.table-scroll {
-  overflow-x: auto;
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
-}
-
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
+.table-scroll { overflow-x: auto; overflow-y: auto; flex: 1; min-height: 0; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+.data-table-header { position: sticky; top: 0; z-index: 2; }
+.data-table-body { position: absolute; top: 0; left: 0; width: 100%; }
 .data-table th {
-  position: sticky;
-  top: 0;
-  background: var(--bg-input);
-  padding: 10px 14px;
-  text-align: left;
-  font-weight: 600;
-  color: var(--text-secondary);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
+  background: var(--bg-input); padding: 10px 14px; text-align: left;
+  font-weight: 600; color: var(--text-secondary); font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--border); white-space: nowrap;
 }
-
-.data-table th.sortable {
-  cursor: pointer;
-  user-select: none;
-}
-
-.data-table th.sortable:hover {
-  color: var(--text-primary);
-}
-
+.data-table th.sortable { cursor: pointer; user-select: none; }
+.data-table th.sortable:hover { color: var(--text-primary); }
 .data-table td {
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-primary);
+  padding: 8px 14px; border-bottom: 1px solid var(--border); color: var(--text-primary);
+  height: 33px; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.data-table tbody tr:hover { background: var(--bg-hover); }
 
-.data-table tbody tr:hover {
-  background: var(--bg-hover);
-}
-
+/* ── Chart ── */
 .chart-container {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
+  flex: 1; min-height: 0; position: relative; padding: 8px;
 }
-
-.chart-svg {
-  width: 100%;
-  height: 100%;
+.chart-canvas {
+  display: block; width: 100%; height: 100%; cursor: crosshair;
 }
+.chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(30, 32, 38, 0.92);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #e0e0e4;
+  white-space: nowrap;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.tt-row { line-height: 1.5; }
+.tt-y { color: #6db3f8; font-weight: 600; }
+.zoom-reset-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 5px;
+  background: rgba(30, 32, 38, 0.85);
+  backdrop-filter: blur(6px);
+  color: #b0b4be;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  z-index: 10;
+  transition: background 0.15s, color 0.15s;
+}
+.zoom-reset-btn:hover { background: rgba(79,143,247,0.3); color: #fff; }
 </style>

@@ -5,6 +5,8 @@ import { useChatStore } from '../stores/chat.js'
 const props = defineProps({
   /** loadFile data with zones array, for "Add Zone" dropdown */
   meshData: { type: Object, default: null },
+  /** Source file path for the currently active file */
+  sourceFile: { type: String, default: '' },
 })
 
 const {
@@ -32,13 +34,15 @@ const zones = computed(() =>
 
 const currentZoneScalars = computed(() => {
   const z = zones.value.find(x => x.name === newZone.value)
-  return z?.scalars || []
+  const scalars = z?.scalars || []
+  return [...scalars].sort((a, b) => (a.display_name || a.raw_name).localeCompare(b.display_name || b.raw_name))
 })
 
 async function refreshZones() {
   try {
     loadingZones.value = true
-    const resp = await fetch(`http://localhost:8000/api/zones/${sessionId.value}`)
+    const fileParam = props.sourceFile ? `?file=${encodeURIComponent(props.sourceFile)}` : ''
+    const resp = await fetch(`http://localhost:8000/api/zones/${sessionId.value}${fileParam}`)
     if (resp.ok) {
       const data = await resp.json()
       if (data.zones) liveZones.value = data.zones
@@ -79,6 +83,7 @@ function addZoneLayer() {
       sessionId: sessionId.value,
       zone: newZone.value,
       scalarName: newScalar.value,
+      sourceFile: props.sourceFile,
     },
   })
 }

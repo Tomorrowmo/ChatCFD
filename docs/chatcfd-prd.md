@@ -404,9 +404,9 @@ ChatCFD 是一个基于 AI 的 CFD（计算流体力学）仿真数据智能分�
 
 ### 3.5 `calculate` 支持的 method（算法注册表）
 
-#### 已实现算法（9 个）
+#### 已实现算法（14 个）
 
-> 🆕 **更新（2026-04-09）**：原计划 Phase 3 的 5 个算法（slice/clip/streamline/contour/render）已在 Phase 1 提前实现。
+> 🆕 **更新（2026-04-13）**：新增 4 个 Romtek C++ 算法（rtslice / rtstreamline / rtcontour / rtvectorfield）+ 体渲染 rtvolumerender，均支持多帧。
 
 | method | 功能 | 依赖 | 状态 |
 |--------|------|------|------|
@@ -419,13 +419,18 @@ ChatCFD 是一个基于 AI 的 CFD（计算流体力学）仿真数据智能分�
 | `streamline` | 流线计算（自适应种子策略） | VTK（vtkStreamTracer） | 🆕 提前实现 ✅ |
 | `contour` | 等值面提取 | VTK（vtkContourFilter） | 🆕 提前实现 ✅ |
 | `render` | 离屏渲染生成 PNG | VTK（vtkWindowToImageFilter） | 🆕 提前实现 ✅ |
+| `rtslice` | 切片截面（Romtek C++） | VTK C++（SliceFilter） | 🆕 新增 ✅ |
+| `rtstreamline` | 流线计算（Romtek C++） | VTK C++（VectorFlowLineFilter） | 🆕 新增 ✅ |
+| `rtcontour` | 等值面提取（Romtek C++） | VTK C++（ContourPlaneFilter） | 🆕 新增 ✅ |
+| `vector_field` | 矢量场均匀网格箭头 | VTK C++（VectorFieldFilter） | 🆕 新增 ✅ |
+| `volume_render` | 体渲染数据准备 | VTK C++（VolumeRenderFilter） | 🆕 新增 ✅ |
 
 #### 规划算法（尚未实现）
 
 | method | 功能 | 是否依赖 VTK |
 |--------|------|:------------:|
 | `probe` | 指定坐标点取值 | 是（需要空间查找） |
-| `surface_extract` | 提取表面数据 | 是（边界识别） |
+| `surface_extract` | 提取表面数据 | 是（SurfaceFilter） |
 
 ### 3.6 `compare` 工具
 
@@ -848,14 +853,14 @@ Prompt 层：
 
 | Filter | 功能 | 对应 method |
 |--------|------|------------|
-| SliceFilter | 切片 | `slice`（规划） |
-| ContourPlaneFilter | 等值面 | `contour`（规划） |
-| VectorFlowLineFilter | 流线 | `streamline`（规划） |
-| VectorFieldFilter | 向量场生成 | `vector_field`（规划） |
+| SliceFilter | 切片 | `rtslice` ✅ |
+| ContourPlaneFilter | 等值面 | `rtcontour` ✅ |
+| VectorFlowLineFilter | 流线 | `rtstreamline` ✅ |
+| VectorFieldFilter | 向量场生成 | `vector_field` ✅ |
 | IdwInterpolation | 反距离加权插值 | 内部使用 |
 | LinearInterpolation | 线性插值 | 内部使用 |
 | SurfaceFilter | 表面提取 | `surface_extract`（规划） |
-| VolumeRenderFilter | 体渲染数据准备 | `volume_render`（规划） |
+| VolumeRenderFilter | 体渲染数据准备 | `volume_render` ✅ |
 
 ---
 
@@ -1324,6 +1329,13 @@ AI：  执行脚本 → 返回图片路径
 Phase 1 实现 VTK.js 基础 3D 渲染（加载网格 + 标量着色 + 旋转/缩放/平移）。
 Phase 4 升级为 VTK.js 高级交互（探针点选 → 自动调 probe、框选区域、对话联动）。
 
+> 🆕 **更新（2026-04-13）**：已实现的 VTK.js 高级能力：
+> - **多帧时间序列播放**：所有 3D 视图（MeshBrowser / VtpBrowser / SceneViewer）均支持 TimeControls 帧播放
+> - **全局标量范围**：所有可视化着色 min/max 保持全帧一致（后端预计算 + 前端预加载）
+> - **矢量箭头显示**：VtpBrowser 支持 vtkGlyph3DMapper + vtkArrowSource 矢量场可视化，自动检测 3 分量向量或分量三元组（velocity_x/y/z）
+> - **多图层合成**：SceneViewer 支持 zone 图层 + 算法结果图层叠加，各图层独立可见性控制
+> - **目录加载**：loadFile 传入目录 → 自动识别所有支持格式文件 → 每文件一帧的 MultiFileFrameSequence
+
 ### 🆕 13.6 前端组件清单（已实现）
 
 > **新增（2026-04-09）**
@@ -1337,8 +1349,9 @@ Phase 4 升级为 VTK.js 高级交互（探针点选 → 自动调 probe、框�
 | `VtkViewer.vue` | VTK.js 3D 渲染核心组件 |
 | `SceneViewer.vue` | 多层 3D 场景（算法结果叠加显示） |
 | `MeshBrowser.vue` | 区域/标量浏览器（zone 选择 + scalar 切换） |
-| `VtpBrowser.vue` | VTP 文件查看器（切片/流线/等值面结果） |
+| `VtpBrowser.vue` | VTP 文件查看器（切片/流线/矢量场结果），支持标量着色 + 矢量箭头显示 |
 | `LayerPanel.vue` | 多图层控制面板 |
+| `TimeControls.vue` | 🆕 多帧播放控制器（播放/暂停/逐帧/FPS/进度条） |
 | `DataTable.vue` | 表格数据展示（JSON 结果） |
 | `Sidebar.vue` | 导航侧边栏（对话历史） |
 | `SettingsModal.vue` | 设置对话框（模型/API 配置） |
@@ -1565,7 +1578,7 @@ JSONL 格式便于追加写入和逐行分析，不需要读整个文件。
 
 ### Phase 1：核心能力（当前 → 可用）— ✅ 已完成
 
-> 🆕 **更新（2026-04-09）**：Phase 1 全部完成，且提前实现了 Phase 3 的 5 个算法和 Mempalace 记忆集成。
+> 🆕 **更新（2026-04-13）**：Phase 1 全部完成，且提前实现了 Phase 3 的 5+5 个算法、多帧时间序列播放、矢量箭头显示、目录加载等功能。
 
 **目标**：完成 MCP Server 架构重构 + 基础前端，让用户在本地通过网页即可体验完整链路：对话分析 + 3D 可视化。后端 6 个工具覆盖文件加载、计算、导出、对比；前端实现对话界面 + Artifact 侧边栏 + VTK.js 基础 3D 渲染。
 
@@ -1585,10 +1598,17 @@ JSONL 格式便于追加写入和逐行分析，不需要读整个文件。
 **超出 Phase 1 范围的已实现内容**：
 
 - [x] 🆕 切片 slice / 裁剪 clip / 流线 streamline / 等值面 contour / 离屏渲染 render（原 Phase 3 算法）
+- [x] 🆕 Romtek C++ 算法 5 个：rtslice / rtstreamline / rtcontour / vector_field / volume_render（均支持多帧）
 - [x] 🆕 MCPClientPool 多 MCP server 架构（支持 SSE + stdio 双协议）
-- [x] 🆕 Mempalace 跨会话记忆集成（详见 §19）
+- [x] 🆕 Mempalace 跨会话记忆集成（详见 §18）
 - [x] 🆕 前端多层 3D 场景（SceneViewer + LayerPanel，算法结果叠加显示）
 - [x] 🆕 HTTP API 扩展：surface / geometry / zones 端点
+- [x] 🆕 多帧时间序列支持（FrameSequence + MultiFileFrameSequence + 后台预加载 + LRU 缓存）
+- [x] 🆕 TimeControls 帧播放控制器（播放/暂停/逐帧/FPS 调节），MeshBrowser / VtpBrowser / SceneViewer 均支持
+- [x] 🆕 全局标量范围一致性：所有可视化着色 min/max 保持全帧一致，不使用单帧范围
+- [x] 🆕 目录加载（loadFile 传入目录路径 → MultiFileFrameSequence，每文件一帧）
+- [x] 🆕 矢量箭头显示（VtpBrowser：vtkGlyph3DMapper + vtkArrowSource，支持原生 3 分量向量 + 分量三元组合成）
+- [x] 🆕 All Zones 合并显示（MeshBrowser 支持选择 "All Zones" 合并渲染所有区域）
 
 ### Phase 2：云端 Demo（可用 → 可展示）
 
@@ -1603,15 +1623,17 @@ JSONL 格式便于追加写入和逐行分析，不需要读整个文件。
 
 ### Phase 3：算法扩展 + 子 Agent（可展示 → 实用）
 
-> 🆕 **更新（2026-04-09）**：5 个核心算法已提前实现（见 Phase 1）。本阶段剩余工作以子 Agent 和高级功能为主。
+> 🆕 **更新（2026-04-13）**：10 个核心算法 + 5 个 Romtek C++ 算法已提前实现（见 Phase 1）。本阶段剩余工作以子 Agent 和高级功能为主。
 
 **目标**：引入子 Agent 处理多文件对比和 AI Coding 等复杂场景。
 
-- [x] ~~切片（slice）~~ — 🆕 已在 Phase 1 实现
-- [x] ~~流线（streamline）~~ — 🆕 已在 Phase 1 实现（含自适应种子策略）
-- [x] ~~等值面（contour）~~ — 🆕 已在 Phase 1 实现
+- [x] ~~切片（slice / rtslice）~~ — 🆕 已在 Phase 1 实现（含 Romtek C++ 版本）
+- [x] ~~流线（streamline / rtstreamline）~~ — 🆕 已在 Phase 1 实现（含自适应种子策略 + Romtek C++ 版本）
+- [x] ~~等值面（contour / rtcontour）~~ — 🆕 已在 Phase 1 实现（含 Romtek C++ 版本）
 - [x] ~~离屏渲染云图（render）~~ — 🆕 已在 Phase 1 实现
 - [x] ~~compare 对比~~ — 🆕 已在 Phase 1 实现
+- [x] ~~矢量场（vector_field）~~ — 🆕 已在 Phase 1 实现（Romtek C++ VectorFieldFilter）
+- [x] ~~体渲染（volume_render）~~ — 🆕 已在 Phase 1 实现（Romtek C++ VolumeRenderFilter）
 - [ ] 表面提取（surface_extract）— 依赖 VTK SurfaceFilter
 - [ ] 空间探针（probe）— 依赖 VTK
 - [ ] 子 Agent：AI Coding 隔离执行 — 🆕 可接入 Mempalace diary
