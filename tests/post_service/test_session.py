@@ -55,9 +55,10 @@ class TestSessionManager:
         assert mgr.get("s1") is None
 
     def test_destroy_clears_post_data(self):
+        from types import SimpleNamespace
         mgr = SessionManager()
         state = mgr.create("s1")
-        state.post_data = object()  # simulate a PostData reference
+        state.post_data = SimpleNamespace(file_path="/fake/path.cgns")
         mgr.destroy("s1")
         assert state.post_data is None
 

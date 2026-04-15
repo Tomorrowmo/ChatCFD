@@ -98,8 +98,9 @@ class TestCalculateErrors:
         assert "No file loaded" in result["error"]
 
     def test_unknown_method(self, engine):
+        from types import SimpleNamespace
         state = engine.session_mgr.create("s2")
-        state.post_data = object()  # fake non-None post_data
+        state.post_data = SimpleNamespace(file_path="/fake/path.cgns")
         result = engine.calculate("s2", "no_such_method", {}, "")
         assert "error" in result
         assert "Unknown method" in result["error"]
