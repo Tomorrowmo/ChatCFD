@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { POST_SERVICE_URL } from '../config.js'
 import { useChatStore } from '../stores/chat.js'
 
 const props = defineProps({
@@ -71,7 +72,7 @@ function linkifyPaths(text) {
     /([A-Z]:[\\/][\w.\-\\/]+\.(?:csv|png|jpg|vtp|vtm|vts|cgns|plt|dat|case))/gi,
     (match) => {
       const escapedPath = match.replace(/'/g, "\\'")
-      return `<a href="#" class="file-link" title="在文件管理器中打开" onclick="event.preventDefault();fetch('http://localhost:8000/api/open-folder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:'${escapedPath}'})}).catch(()=>{})">${match}</a>`
+      return `<a href="#" class="file-link" title="在文件管理器中打开" onclick="event.preventDefault();fetch('${POST_SERVICE_URL}/api/open-folder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:'${escapedPath}'})}).catch(()=>{})">${match}</a>`
     }
   )
 }
@@ -83,6 +84,10 @@ function linkifyPaths(text) {
       <template v-if="hasParts">
         <template v-for="(part, i) in parts" :key="i">
           <div v-if="part.type === 'text'" class="bubble-text" v-html="linkifyPaths(part.content)"></div>
+          <div v-else-if="part.type === 'tool_pending'" class="tool-pending">
+            <span class="spinner"></span>
+            <span class="pending-text">正在准备 {{ part.tool }}...</span>
+          </div>
           <div v-else-if="part.type === 'tool'" class="tool-part" :class="part.status">
             <div class="tool-header">
               <span class="tool-icon">
@@ -151,6 +156,20 @@ function linkifyPaths(text) {
 
 .bubble-text {
   white-space: pre-wrap;
+}
+
+.tool-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.pending-text {
+  font-style: italic;
 }
 
 .tool-part {

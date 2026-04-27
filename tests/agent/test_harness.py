@@ -101,3 +101,39 @@ class TestAfterCall:
     def test_non_dict_passthrough(self):
         h = Harness()
         assert h.after_call("test", "raw string") == "raw string"
+
+
+class TestCodingTools:
+    """Tests for runBash/runPython tool name coverage in Harness."""
+
+    def test_runBash_blocked_without_confirm(self):
+        h = Harness()
+        result = h.before_call("runBash", {"command": "echo hi"}, user_confirmed_coding=False)
+        assert result is not None
+        assert "确认" in result["error"]
+
+    def test_runBash_allowed_with_confirm(self):
+        h = Harness()
+        result = h.before_call("runBash", {"command": "echo hi"}, user_confirmed_coding=True)
+        assert result is None
+
+    def test_runPython_blocked_without_confirm(self):
+        h = Harness()
+        result = h.before_call("runPython", {"code": "print(1)"}, user_confirmed_coding=False)
+        assert result is not None
+
+    def test_runPython_allowed_with_confirm(self):
+        h = Harness()
+        result = h.before_call("runPython", {"code": "print(1)"}, user_confirmed_coding=True)
+        assert result is None
+
+    def test_runBash_dangerous_blocked(self):
+        h = Harness()
+        result = h.before_call("runBash", {"command": "sudo rm -rf /"}, user_confirmed_coding=True)
+        assert result is not None
+        assert "Dangerous" in result["error"]
+
+    def test_runPython_dangerous_not_blocked_at_harness(self):
+        h = Harness()
+        result = h.before_call("runPython", {"code": "import os"}, user_confirmed_coding=True)
+        assert result is None

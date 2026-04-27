@@ -3,7 +3,13 @@
 import vtk
 
 NAME = "force_moment"
-DESCRIPTION = "Integrate pressure/shear forces and moments on surface zones."
+DESCRIPTION = """对表面 zone 积分压力/剪力，得到力、力矩、升阻力系数。需表面 zone（wall/tri）。
+必需参数（计算系数时）：density、velocity、refArea —— 不传则只出原始力值，不出 CL/CD。
+可选：pressure（标量字段名，默认 "pressure"）、shear_force（如 ["shear_x","shear_y","shear_z"]）。
+可选：refLength=1.0、flip_normals=True、alpha_angle/beta_angle 攻角侧滑角=0、reference_point 力矩参考点。
+输出：力矢量 (Fx,Fy,Fz)、力矩 (Mx,My,Mz)、CL/CD/CY 系数（若给了 density/velocity/refArea）。
+适用：机翼/物体表面气动力计算。
+不适用：体网格 zone（体量用 velocity_gradient 算涡量/Mach/Cp 等）。"""
 DEFAULTS = {
     "pressure": "pressure",
     "density": None,       # required for coefficients

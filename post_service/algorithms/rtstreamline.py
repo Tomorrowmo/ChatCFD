@@ -1,15 +1,22 @@
-"""Streamline computation using Romtek VectorFlowLineFilter (Romtek C++ engine).
+"""Streamline computation — hybrid engine.
 
-Replaces the old vtkStreamTracer-based streamline.py (now _streamline.py).
-Uses line or sphere seed placement with configurable density and propagation.
+Engine selection (via `engine` param):
+- "auto" (default): steady → vtk (_streamline, smart seeding); transient → rt (Romtek C++)
+- "rt": force Romtek VectorFlowLineFilter. Use this when user reports poor streamline
+        quality from the default engine ("效果不好" / "streamlines look bad").
+- "vtk": force vtkStreamTracer + smart seeding (steady only; errors on transient).
 """
+import importlib.util
 import math
 import os
 
 import vtk
 
 NAME = "streamline"
-DESCRIPTION = "Compute streamlines from velocity field. Outputs a .vtp file for 3D viewing."
+DESCRIPTION = (
+    "Compute streamlines from velocity field. Outputs a .vtp file for 3D viewing. "
+    "Set engine='rt' to switch to the Romtek C++ engine if the default result looks bad."
+)
 DEFAULTS = {
     "velocity_x": "velocity_x",
     "velocity_y": "velocity_y",
@@ -21,10 +28,62 @@ DEFAULTS = {
     "seed_end": None,           # [x, y, z] seed end position (None = auto)
     "step_ratio": 1.0,          # line step ratio
     "max_propagation": None,    # max propagation length (None = auto)
+    "seed_strategy": "auto",    # "auto"|"line"|"plane"|"inlet" (steady/vtk mode)
+    "integration_direction": "forward",  # "forward"|"backward"|"both" (steady/vtk mode)
+    "tube_radius": None,        # tube radius for rendering (None = auto, steady/vtk mode)
+    "tube_sides": 12,           # tube polygon sides (steady/vtk mode)
+    "engine": "auto",           # "auto"|"rt"|"vtk" — switch to "rt" if default looks bad
 }
 
 
+def _load_streamline_module():
+    """Load _streamline.py as internal module (skipped by registry due to _ prefix)."""
+    module_path = os.path.join(os.path.dirname(__file__), "_streamline.py")
+    spec = importlib.util.spec_from_file_location("_streamline", module_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
+    # --- Engine routing ---
+    sequence = kwargs.get("sequence")
+    frame_count = kwargs.get("frame_count", 1)
+    is_transient = sequence is not None and frame_count > 1
+
+    engine = str(params.get("engine", "auto")).lower()
+
+    # Explicit override takes precedence
+    if engine == "rt":
+        return _execute_transient(post_data, params, zone_name, **kwargs)
+    if engine == "vtk":
+        if is_transient:
+            return {"error": "engine='vtk' does not support transient data. Use engine='rt' or 'auto'."}
+        return _execute_steady(post_data, params, zone_name)
+
+    # Auto: steady → vtk (better quality), transient → rt (multi-frame support)
+    if is_transient:
+        return _execute_transient(post_data, params, zone_name, **kwargs)
+    return _execute_steady(post_data, params, zone_name)
+
+
+def _execute_steady(post_data, params: dict, zone_name: str) -> dict:
+    """Steady mode: delegate to _streamline.py (vtkStreamTracer + smart seeding)."""
+    mod = _load_streamline_module()
+
+    # Map rtstreamline params → _streamline params
+    mapped = dict(params)
+    if "n_lines" in mapped and "n_seeds" not in mapped:
+        mapped["n_seeds"] = mapped.pop("n_lines")
+    if "max_propagation" in mapped and "max_length" not in mapped:
+        mapped["max_length"] = mapped.pop("max_propagation")
+    # Pass through seed_strategy, integration_direction, tube_radius, tube_sides as-is
+
+    return mod.execute(post_data, mapped, zone_name)
+
+
+def _execute_transient(post_data, params: dict, zone_name: str, **kwargs) -> dict:
+    """Transient mode: Romtek VectorFlowLineFilter (C++ engine, multi-frame)."""
     multiblock = post_data.get_vtk_data()
 
     # --- 1. Resolve velocity component names ---

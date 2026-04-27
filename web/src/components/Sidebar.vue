@@ -11,6 +11,8 @@ const {
   setActiveConversation,
 } = useChatStore()
 
+const emit = defineEmits(['update:pinned'])
+
 const showSettings = ref(false)
 const pinned = ref(false)     // user clicked the pin button
 const hovering = ref(false)   // mouse is over sidebar
@@ -39,6 +41,7 @@ function onLeave() {
 
 function togglePin() {
   pinned.value = !pinned.value
+  emit('update:pinned', pinned.value)
   if (pinned.value) {
     expanded.value = true
   } else if (!hovering.value) {

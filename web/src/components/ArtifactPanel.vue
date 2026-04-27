@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useChatStore } from '../stores/chat.js'
+import { POST_SERVICE_URL } from '../config.js'
 import JsonCard from './JsonCard.vue'
 import DataTable from './DataTable.vue'
 import MeshBrowser from './MeshBrowser.vue'
@@ -67,8 +68,8 @@ const resultTabs = computed(() => {
       // Exclude loadFile artifacts (they go in file tabs)
       if (art.data && Array.isArray(art.data.zones) && art.data.zones.length > 0) return false
       // Include visual results: vtp, png
-      if ((art.type === 'file' || art.type === 'geometry') && art.file_path) {
-        if (!(art.file_path.endsWith('.vtp') || art.file_path.endsWith('.png') || art.file_path.endsWith('.jpg'))) return false
+      if ((art.type === 'file' || art.type === 'geometry' || art.type === 'image') && art.file_path) {
+        if (!(art.file_path.endsWith('.vtp') || art.file_path.endsWith('.png') || art.file_path.endsWith('.jpg') || art.file_path.endsWith('.gif'))) return false
         // Match by source_file (exact match to active file)
         // If source_file is empty/missing, hide it (don't show untagged results everywhere)
         if (fp && (!art.source_file || art.source_file !== fp)) return false
@@ -104,11 +105,11 @@ const viewerType = computed(() => {
   if (!art) return 'none'
   if (art.data && Array.isArray(art.data.zones) && art.data.zones.length > 0) return 'mesh'
   if (art.type === 'numerical') return 'json'
-  if ((art.type === 'file' || art.type === 'geometry') && art.file_path) {
+  if ((art.type === 'file' || art.type === 'geometry' || art.type === 'image') && art.file_path) {
     if (art.file_path.endsWith('.csv')) return 'table'
     if (art.file_path.endsWith('.vtp')) return 'vtk'
     if (art.file_path.endsWith('.vtm')) return 'json'
-    if (art.file_path.endsWith('.png') || art.file_path.endsWith('.jpg')) return 'image'
+    if (art.file_path.endsWith('.png') || art.file_path.endsWith('.jpg') || art.file_path.endsWith('.gif')) return 'image'
   }
   return 'json'
 })
@@ -213,7 +214,7 @@ const viewerType = computed(() => {
 
       <img
         v-else-if="viewerType === 'image'"
-        :src="`http://localhost:8000/api/file/${activeArtifact.file_path.split('/').map(s => encodeURIComponent(s)).join('/')}`"
+        :src="`${POST_SERVICE_URL}/api/file/${activeArtifact.file_path.replace(/\\/g, '/').split('/').map(s => encodeURIComponent(s)).join('/')}`"
         class="artifact-image"
         :alt="activeArtifact.title"
       />

@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import ArtifactPanel from './components/ArtifactPanel.vue'
@@ -11,14 +11,16 @@ const panelOpen = computed(() => state.artifactPanelOpen)
 const listVisible = computed(() => state.artifactListVisible)
 const hasArtifacts = computed(() => activeArtifacts.value.length > 0)
 const artifactCount = computed(() => activeArtifacts.value.length)
+const sidebarPinned = ref(false)
 </script>
 
 <template>
   <div class="app-layout" :class="{
     'panel-open': panelOpen,
-    'list-visible': !panelOpen && listVisible && hasArtifacts
+    'list-visible': !panelOpen && listVisible && hasArtifacts,
+    'sidebar-pinned': sidebarPinned
   }">
-    <Sidebar />
+    <Sidebar @update:pinned="v => sidebarPinned = v" />
     <div class="sidebar-rail"></div>
 
     <div class="chat-side">
@@ -68,14 +70,25 @@ const artifactCount = computed(() => activeArtifacts.value.length)
   transition: grid-template-columns 0.25s ease;
 }
 
+/* Sidebar pinned: widen rail to match expanded sidebar */
+.app-layout.sidebar-pinned {
+  grid-template-columns: 260px 1fr;
+}
+
 /* State B: narrow list panel */
 .app-layout.list-visible {
   grid-template-columns: 56px 1fr 260px;
+}
+.app-layout.sidebar-pinned.list-visible {
+  grid-template-columns: 260px 1fr 260px;
 }
 
 /* State A: full viewer */
 .app-layout.panel-open {
   grid-template-columns: 56px 1fr 1fr;
+}
+.app-layout.sidebar-pinned.panel-open {
+  grid-template-columns: 260px 1fr 1fr;
 }
 
 .sidebar-rail {

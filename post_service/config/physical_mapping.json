@@ -1,96 +1,3142 @@
 {
-  "pressure": {
-    "standard_name": "pressure",
-    "display_name": "Pressure",
-    "unit": "Pa",
-    "aliases": [
-      "Pressure",
-      "Static_Pressure",
-      "p",
-      "PRES",
-      "pressure"
-    ]
+  "solver_profiles": {
+    "openfoam_incompressible": {
+      "solver_name": "OpenFOAM · 不可压缩流",
+      "description": "适用：simpleFoam / pisoFoam / pimpleFoam / interFoam  |  核心坑：p 是运动压力（m²/s²），不是 Pa",
+      "detection": {
+        "features": "目录结构：存在 constant/ system/ 0/ 三个子目录；constant/polyMesh/ 存在",
+        "confidence": "HIGH",
+        "notes": "版本无关，结构特征稳定"
+      },
+      "mappings": [
+        {
+          "raw_name": "p",
+          "physical_name": "pressure_kinematic",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "×ρ(kg/m³)→Pa",
+          "confidence": "HIGH",
+          "ambiguity_risk": "高",
+          "notes": "【最常见坑】运动压力 m²/s²，绝非 Pa。直接当静压用会差约1000倍。必须乘以参考密度换算。"
+        },
+        {
+          "raw_name": "U",
+          "physical_name": "velocity_x/y/z",
+          "type": "vector",
+          "vector_components": "xyz",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "三分量向量。U[0]=Ux, U[1]=Uy, U[2]=Uz。"
+        },
+        {
+          "raw_name": "k",
+          "physical_name": "tke",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "湍动能，m²/s²。k-ε 和 k-ω 模型均有此变量。"
+        },
+        {
+          "raw_name": "omega",
+          "physical_name": "sdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "比耗散率 ω，1/s。k-ω 模型专用，注意与 ε 区分。"
+        },
+        {
+          "raw_name": "epsilon",
+          "physical_name": "tdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "湍动能耗散率 ε，m²/s³。k-ε 模型专用。"
+        },
+        {
+          "raw_name": "nut",
+          "physical_name": "nut",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "运动湍流粘性 νt，m²/s。"
+        },
+        {
+          "raw_name": "nuTilda",
+          "physical_name": "nut",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "Spalart-Allmaras 模型修正粘性变量，量纲同 nut。"
+        },
+        {
+          "raw_name": "p_rgh",
+          "physical_name": "pressure_kinematic",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "×ρ→Pa",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "去除静水压的修正压力，浮力流用。p_rgh ≠ p，不可混用。"
+        },
+        {
+          "raw_name": "T",
+          "physical_name": "temperature",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "温度 K，buoyantFoam 等热流求解器才有此字段。"
+        },
+        {
+          "raw_name": "rho",
+          "physical_name": "density",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "纯不可压流理论上无此字段；若出现需确认是否为多相流或热流。"
+        },
+        {
+          "raw_name": "wallShearStress",
+          "physical_name": "wall_shear_stress",
+          "type": "vector",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "由 wallShearStress 函数对象输出，非求解变量。"
+        },
+        {
+          "raw_name": "yPlus",
+          "physical_name": "y_plus",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "由 yPlus 函数对象输出。"
+        },
+        {
+          "raw_name": "Cp",
+          "physical_name": "pressure_coefficient",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": "由 pressureCoefficient 函数对象输出，需确认参考量设置。"
+        },
+        {
+          "raw_name": "vorticity",
+          "physical_name": "vorticity_x/y/z",
+          "type": "vector",
+          "vector_components": "xyz",
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": "由 vorticity 函数对象输出。"
+        },
+        {
+          "raw_name": "Q",
+          "physical_name": "q_criterion",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": "由 Q 函数对象输出。"
+        },
+        {
+          "raw_name": "phi",
+          "physical_name": null,
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "界面通量（flux），单位 m³/s，不用于后处理计算。"
+        }
+      ]
+    },
+    "openfoam_compressible": {
+      "solver_name": "OpenFOAM · 可压缩流",
+      "description": "适用：rhoCentralFoam / rhoSimpleFoam / sonicFoam  |  核心坑：p 含义与不可压完全不同，求解器类型必须区分",
+      "detection": {
+        "features": "目录结构：存在 constant/ system/ 0/ 三个子目录；constant/polyMesh/ 存在",
+        "confidence": "HIGH",
+        "notes": "版本无关，结构特征稳定"
+      },
+      "mappings": [
+        {
+          "raw_name": "p",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "高",
+          "notes": "【同名异义】可压流的 p 是真实静压 Pa，与不可压的 p（运动压力 m²/s²）含义完全不同！求解器类型判断是关键。"
+        },
+        {
+          "raw_name": "U",
+          "physical_name": "velocity_x/y/z",
+          "type": "vector",
+          "vector_components": "xyz",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "同不可压。"
+        },
+        {
+          "raw_name": "T",
+          "physical_name": "temperature",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "静温 K。"
+        },
+        {
+          "raw_name": "rho",
+          "physical_name": "density",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "密度 kg/m³，可压流标准变量。"
+        },
+        {
+          "raw_name": "e",
+          "physical_name": "internal_energy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "内能 J/kg，rhoCentralFoam 等使用。"
+        },
+        {
+          "raw_name": "Ek",
+          "physical_name": "total_energy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": "总能量，部分求解器输出。"
+        },
+        {
+          "raw_name": "k",
+          "physical_name": "tke",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "同不可压。"
+        },
+        {
+          "raw_name": "omega",
+          "physical_name": "sdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "同不可压。"
+        },
+        {
+          "raw_name": "epsilon",
+          "physical_name": "tdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "同不可压。"
+        },
+        {
+          "raw_name": "mut",
+          "physical_name": "nut",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷ρ→m²/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "动力湍流粘性 μt（Pa·s），换算为运动粘性需除以密度。与不可压的 nut（m²/s）量纲不同。"
+        },
+        {
+          "raw_name": "alphat",
+          "physical_name": null,
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "湍流热扩散率，不直接对应流场物理量，一般不用于后处理。"
+        },
+        {
+          "raw_name": "Ma",
+          "physical_name": "mach_number",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": "部分求解器后处理输出，也可由 p/T/U 计算得到。"
+        }
+      ]
+    },
+    "fluent": {
+      "solver_name": "ANSYS Fluent",
+      "description": "文件格式：.cas + .dat（或 .cas.h5 + .dat.h5）  |  核心坑：默认输出表压，积分力系数前必须确认操作压力设置",
+      "detection": {
+        "features": "文件头魔数：cas 文件首行包含 (0 \"FLUENT\"；dat 文件对应 cas 文件",
+        "confidence": "HIGH",
+        "notes": "Fluent 6.x 以上均适用"
+      },
+      "mappings": [
+        {
+          "raw_name": "pressure",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "+101325→绝对压",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "默认输出表压（相对于操作压力）。若操作压力设为0则为绝对压。积分力系数时必须确认！"
+        },
+        {
+          "raw_name": "x-velocity",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "y-velocity",
+          "physical_name": "velocity_y",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "z-velocity",
+          "physical_name": "velocity_z",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "velocity-magnitude",
+          "physical_name": "velocity_magnitude",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "density",
+          "physical_name": "density",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "temperature",
+          "physical_name": "temperature",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "total-pressure",
+          "physical_name": "pressure_total",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "mach-number",
+          "physical_name": "mach_number",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "pressure-coefficient",
+          "physical_name": "pressure_coefficient",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "需在 Fluent 中正确设置参考值（参考压力/速度/面积）才有意义。"
+        },
+        {
+          "raw_name": "turb-kinetic-energy",
+          "physical_name": "tke",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "turb-diss-rate",
+          "physical_name": "tdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "ε，k-ε 模型。"
+        },
+        {
+          "raw_name": "specific-diss-rate",
+          "physical_name": "sdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "ω，k-ω 模型。"
+        },
+        {
+          "raw_name": "turb-viscosity",
+          "physical_name": "nut",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷ρ→m²/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "动力湍流粘性 μt（Pa·s），换算运动粘性需除以密度。"
+        },
+        {
+          "raw_name": "wall-shear-stress",
+          "physical_name": "wall_shear_stress",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "壁面剪切应力幅值。"
+        },
+        {
+          "raw_name": "y-plus",
+          "physical_name": "y_plus",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "skin-friction-coeff",
+          "physical_name": "skin_friction_coeff",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "vorticity-mag",
+          "physical_name": "vorticity_magnitude",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "q-criterion",
+          "physical_name": "q_criterion",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": "需在 Fluent 中显式开启输出。"
+        }
+      ]
+    },
+    "cfx": {
+      "solver_name": "ANSYS CFX",
+      "description": "文件格式：.res  |  变量名含空格，需特别处理  |  默认输出绝对压（与 Fluent 的表压默认值不同）",
+      "detection": {
+        "features": ".res 文件头包含 CPCFD 标识字节；.def 文件同目录",
+        "confidence": "HIGH",
+        "notes": null
+      },
+      "mappings": [
+        {
+          "raw_name": "Pressure",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "静压 Pa，CFX 默认输出绝对压（与 Fluent 默认表压不同）。"
+        },
+        {
+          "raw_name": "Total Pressure",
+          "physical_name": "pressure_total",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Velocity u",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "CFX 变量名含空格，解析时注意字符串处理。"
+        },
+        {
+          "raw_name": "Velocity v",
+          "physical_name": "velocity_y",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Velocity w",
+          "physical_name": "velocity_z",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Velocity",
+          "physical_name": "velocity_magnitude",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "幅值版本。"
+        },
+        {
+          "raw_name": "Temperature",
+          "physical_name": "temperature",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Density",
+          "physical_name": "density",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Mach Number",
+          "physical_name": "mach_number",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "TurbulenceKE",
+          "physical_name": "tke",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "TurbulenceEDR",
+          "physical_name": "tdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "耗散率 ε。"
+        },
+        {
+          "raw_name": "TurbulenceSDR",
+          "physical_name": "sdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "比耗散率 ω。"
+        },
+        {
+          "raw_name": "Eddy Viscosity",
+          "physical_name": "nut",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷ρ→m²/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "动力涡粘性 μt，换算同 Fluent。"
+        },
+        {
+          "raw_name": "Wall Shear",
+          "physical_name": "wall_shear_stress",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Yplus",
+          "physical_name": "y_plus",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Pressure Coefficient",
+          "physical_name": "pressure_coefficient",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Vorticity",
+          "physical_name": "vorticity_magnitude",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        }
+      ]
+    },
+    "cgns": {
+      "solver_name": "CGNS 通用格式",
+      "description": "SIDS 规范命名→HIGH置信度直接映射；非规范命名→LOW置信度需结合来源求解器和值域范围判断",
+      "detection": {
+        "features": "HDF5 格式，根节点含 CGNSBase_t 类型节点",
+        "confidence": "HIGH",
+        "notes": "格式确定，但求解器来源需进一步推断，见下表",
+        "source_detection": [
+          {
+            "source_solver": "OpenFOAM → CGNS",
+            "features": "变量名风格：CoordinateX/Y/Z + Velocity/Pressure，无 Momentum 写法",
+            "confidence": "MEDIUM",
+            "notes": "foamToCGNS 默认命名规范"
+          },
+          {
+            "source_solver": "Fluent → CGNS",
+            "features": "变量名含 x-velocity / pressure / turb-kinetic-energy 等连字符风格",
+            "confidence": "MEDIUM",
+            "notes": "Fluent CGNS 导出保留原始变量名"
+          },
+          {
+            "source_solver": "CFX → CGNS",
+            "features": "变量名含空格：Velocity u / Pressure / TurbulenceKE",
+            "confidence": "MEDIUM",
+            "notes": "CFX 风格特征明显"
+          },
+          {
+            "source_solver": "国内求解器 → CGNS",
+            "features": "变量名含拼音/中文缩写/非 SIDS 命名，如 CoefPressure / rho_u",
+            "confidence": "LOW",
+            "notes": "需 LLM 推断或问用户"
+          },
+          {
+            "source_solver": "遵循 SIDS 规范",
+            "features": "CoordinateX/Y/Z、Density、MomentumX/Y/Z、EnergyStagnationDensity",
+            "confidence": "HIGH",
+            "notes": "SIDS 规范变量名，格式无关可直接映射"
+          }
+        ]
+      },
+      "mappings": [
+        {
+          "raw_name": "Pressure",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "CGNS SIDS 标准命名，真实静压 Pa。"
+        },
+        {
+          "raw_name": "PressureStagnation",
+          "physical_name": "pressure_total",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "SIDS 标准命名。"
+        },
+        {
+          "raw_name": "PressureCoefficient",
+          "physical_name": "pressure_coefficient",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "SIDS 标准命名。"
+        },
+        {
+          "raw_name": "Density",
+          "physical_name": "density",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "SIDS 标准命名。"
+        },
+        {
+          "raw_name": "VelocityX",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "SIDS 标准命名。"
+        },
+        {
+          "raw_name": "VelocityY",
+          "physical_name": "velocity_y",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "VelocityZ",
+          "physical_name": "velocity_z",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "VelocityMagnitude",
+          "physical_name": "velocity_magnitude",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Mach",
+          "physical_name": "mach_number",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "SIDS 标准命名。"
+        },
+        {
+          "raw_name": "Temperature",
+          "physical_name": "temperature",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "MomentumX",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷ρ→m/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "SIDS 动量密度（ρu），需除以密度才是速度。"
+        },
+        {
+          "raw_name": "MomentumY",
+          "physical_name": "velocity_y",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷ρ→m/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": null
+        },
+        {
+          "raw_name": "MomentumZ",
+          "physical_name": "velocity_z",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷ρ→m/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": null
+        },
+        {
+          "raw_name": "TurbulentKineticEnergy",
+          "physical_name": "tke",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "SIDS 标准命名。"
+        },
+        {
+          "raw_name": "TurbulentDissipation",
+          "physical_name": "tdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "SkinFrictionX",
+          "physical_name": "wall_shear_stress",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "VorticityX",
+          "physical_name": "vorticity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "VorticityMagnitude",
+          "physical_name": "vorticity_magnitude",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "p",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "需确认",
+          "confidence": "LOW",
+          "ambiguity_risk": "高",
+          "notes": "非 SIDS 命名。可能是真实静压，也可能是运动压力（OpenFOAM 导出时）。必须结合来源求解器判断。"
+        },
+        {
+          "raw_name": "q",
+          "physical_name": "pressure_kinematic",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "×ρ→Pa",
+          "confidence": "LOW",
+          "ambiguity_risk": "高",
+          "notes": "非 SIDS 命名。部分工具用此名输出运动压力，需结合值域范围判断。"
+        },
+        {
+          "raw_name": "CoefPressure",
+          "physical_name": "pressure_coefficient",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "LOW",
+          "ambiguity_risk": "中",
+          "notes": "非 SIDS 命名，国内部分求解器（如 NSAFOAM）的习惯写法。"
+        },
+        {
+          "raw_name": "rho_u",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷ρ→m/s",
+          "confidence": "LOW",
+          "ambiguity_risk": "中",
+          "notes": "非 SIDS 命名。rho_u 通常是动量密度，需除以密度。"
+        }
+      ]
+    },
+    "tecplot": {
+      "solver_name": "Tecplot PLT / SZPLT  ·  合并版",
+      "description": "格式说明：PLT（二进制）与 SZPLT（新一代）变量命名规则完全相同，均由写入方自由决定，无统一规范。两者合并维护。",
+      "detection": {
+        "features": "二进制魔数：前4字节为 0x23 0x21 0x4C 0x50（\"#!LP\"） | SZL 格式，文件头含 SZPLT 标识",
+        "confidence": "HIGH",
+        "notes": null
+      },
+      "mappings": [
+        {
+          "raw_name": "Cp",
+          "source_solver": "任意",
+          "physical_name": "pressure_coefficient",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "Cp 含义极少歧义，几乎所有写入方均用此表示压力系数。"
+        },
+        {
+          "raw_name": "Cf",
+          "source_solver": "任意",
+          "physical_name": "skin_friction_coeff",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "yplus",
+          "source_solver": "任意",
+          "physical_name": "y_plus",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "y+",
+          "source_solver": "任意",
+          "physical_name": "y_plus",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Mach",
+          "source_solver": "任意",
+          "physical_name": "mach_number",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "Mach 含义明确。"
+        },
+        {
+          "raw_name": "Ma",
+          "source_solver": "任意",
+          "physical_name": "mach_number",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "pressure",
+          "source_solver": "Fluent → PLT",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "+操作压→绝对压",
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "Fluent 导出 PLT 保留原始变量名，来源明确则置信度 HIGH。"
+        },
+        {
+          "raw_name": "Pressure",
+          "source_solver": "CFX → PLT",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "CFX 风格，绝对静压 Pa。"
+        },
+        {
+          "raw_name": "p",
+          "source_solver": "OpenFOAM → PLT",
+          "physical_name": "pressure_kinematic",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "×ρ→Pa",
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "高",
+          "notes": "OpenFOAM foamToTecplot360 导出。【坑】运动压力，需乘密度换算。"
+        },
+        {
+          "raw_name": "x-velocity",
+          "source_solver": "Fluent → PLT",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "Fluent 导出保留连字符命名。"
+        },
+        {
+          "raw_name": "Velocity u",
+          "source_solver": "CFX → PLT",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "CFX 含空格命名风格。"
+        },
+        {
+          "raw_name": "U",
+          "source_solver": "OpenFOAM → PLT",
+          "physical_name": "velocity_x/y/z",
+          "type": "vector",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "中",
+          "notes": "OpenFOAM 导出时 U 可能是向量场或幅值，需确认。"
+        },
+        {
+          "raw_name": "turb-kinetic-energy",
+          "source_solver": "Fluent → PLT",
+          "physical_name": "tke",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "Fluent 命名风格。"
+        },
+        {
+          "raw_name": "TurbulenceKE",
+          "source_solver": "CFX → PLT",
+          "physical_name": "tke",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "CFX 命名风格。"
+        },
+        {
+          "raw_name": "k",
+          "source_solver": "OpenFOAM → PLT",
+          "physical_name": "tke",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "p",
+          "source_solver": "来源未知",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "需确认",
+          "confidence": "LOW",
+          "ambiguity_risk": "高",
+          "notes": "【高风险】来源未知时，p 可能是真实静压（Pa）或运动压力（m²/s²）。参考「14_值域范围判断规则」Sheet 用 min/max 辅助判断。"
+        },
+        {
+          "raw_name": "P",
+          "source_solver": "来源未知",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "需确认",
+          "confidence": "LOW",
+          "ambiguity_risk": "高",
+          "notes": "同上，大写版本。"
+        },
+        {
+          "raw_name": "u",
+          "source_solver": "来源未知",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": "小写 u/v/w 是速度分量最常见命名。"
+        },
+        {
+          "raw_name": "v",
+          "source_solver": "来源未知",
+          "physical_name": "velocity_y",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "w",
+          "source_solver": "来源未知",
+          "physical_name": "velocity_z",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "rho",
+          "source_solver": "来源未知",
+          "physical_name": "density",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "T",
+          "source_solver": "来源未知",
+          "physical_name": "temperature",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "k",
+          "source_solver": "来源未知",
+          "physical_name": "tke",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "omega",
+          "source_solver": "来源未知",
+          "physical_name": "sdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "epsilon",
+          "source_solver": "来源未知",
+          "physical_name": "tdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "vorticity",
+          "source_solver": "来源未知",
+          "physical_name": "vorticity_magnitude",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Q",
+          "source_solver": "来源未知",
+          "physical_name": "q_criterion",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "中",
+          "notes": "Q 也可能表示流量或热量，参考值域范围判断。"
+        },
+        {
+          "raw_name": "x",
+          "source_solver": "来源未知",
+          "physical_name": "velocity_x 或 坐标",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "需确认",
+          "confidence": "LOW",
+          "ambiguity_risk": "高",
+          "notes": "【极高风险】x/y/z 在 PLT 中可能是坐标轴（单位 m，量级 0.01~10）也可能是速度分量（m/s，量级 0~500）。必须用值域范围区分。"
+        },
+        {
+          "raw_name": "y",
+          "source_solver": "来源未知",
+          "physical_name": "velocity_y 或 坐标",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "需确认",
+          "confidence": "LOW",
+          "ambiguity_risk": "高",
+          "notes": "同上。"
+        },
+        {
+          "raw_name": "z",
+          "source_solver": "来源未知",
+          "physical_name": "velocity_z 或 坐标",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "需确认",
+          "confidence": "LOW",
+          "ambiguity_risk": "高",
+          "notes": "同上。"
+        }
+      ]
+    },
+    "starccm": {
+      "solver_name": "Simcenter Star-CCM+",
+      "description": "文件格式：.sim（HDF5）  |  变量名含空格，向量分量用 [i]/[j]/[k]  |  默认绝对压，注意与 Fluent 表压的区别",
+      "detection": {
+        "features": ".sim 为 HDF5 格式，根节点含 STAR-CCM+ 标签",
+        "confidence": "HIGH",
+        "notes": null
+      },
+      "mappings": [
+        {
+          "raw_name": "Pressure",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "静压 Pa，绝对压。Star-CCM+ 默认绝对压（与 Fluent 默认表压不同）。"
+        },
+        {
+          "raw_name": "Total Pressure",
+          "physical_name": "pressure_total",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Pressure Coefficient",
+          "physical_name": "pressure_coefficient",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "需确认参考值设置是否正确。"
+        },
+        {
+          "raw_name": "Dynamic Pressure",
+          "physical_name": "pressure_dynamic",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Velocity[i]",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": "x",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "Star-CCM+ 向量分量写法：[i]/[j]/[k] 对应 x/y/z。"
+        },
+        {
+          "raw_name": "Velocity[j]",
+          "physical_name": "velocity_y",
+          "type": "scalar",
+          "vector_components": "y",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Velocity[k]",
+          "physical_name": "velocity_z",
+          "type": "scalar",
+          "vector_components": "z",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Velocity Magnitude",
+          "physical_name": "velocity_magnitude",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Temperature",
+          "physical_name": "temperature",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Density",
+          "physical_name": "density",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Mach Number",
+          "physical_name": "mach_number",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Turbulent Kinetic Energy",
+          "physical_name": "tke",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Turbulent Dissipation Rate",
+          "physical_name": "tdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "ε，k-ε 模型。"
+        },
+        {
+          "raw_name": "Specific Dissipation Rate",
+          "physical_name": "sdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "ω，k-ω 模型。"
+        },
+        {
+          "raw_name": "Turbulent Viscosity",
+          "physical_name": "nut",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷ρ→m²/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "动力湍流粘性 μt（Pa·s），换算运动粘性需除密度。"
+        },
+        {
+          "raw_name": "Wall Shear Stress",
+          "physical_name": "wall_shear_stress",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Y+",
+          "physical_name": "y_plus",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Skin Friction Coefficient",
+          "physical_name": "skin_friction_coeff",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Vorticity Magnitude",
+          "physical_name": "vorticity_magnitude",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Q Criterion",
+          "physical_name": "q_criterion",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Relative Velocity Magnitude",
+          "physical_name": "velocity_magnitude",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "中",
+          "notes": "旋转机械场景，相对参考系速度幅值，与绝对速度含义不同。"
+        },
+        {
+          "raw_name": "Absolute Pressure",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "显式标注绝对压，与 Pressure 字段含义相同。"
+        },
+        {
+          "raw_name": "Gauge Pressure",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "+p_ref→绝对压",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "表压，需加参考压力（通常 101325 Pa）换算为绝对压。"
+        }
+      ]
+    },
+    "abaqus": {
+      "solver_name": "Abaqus（结构 / 热 / 多物理场）",
+      "description": "文件格式：.odb / .fil / .dat  |  以结构力学为主，变量体系与 CFD 完全不同  |  注意：U=位移，V=结构速度，与 CFD 的 U/V 速度变量含义相反",
+      "detection": null,
+      "mappings": [
+        {
+          "raw_name": "U",
+          "physical_name": "displacement",
+          "type": "vector",
+          "vector_components": "xyz",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "节点位移向量，U[0/1/2] 分别对应 x/y/z 方向位移，单位 m。注意：与 CFD 的速度 U 完全不同，务必先确认文件来源是 Abaqus。"
+        },
+        {
+          "raw_name": "U1",
+          "physical_name": "displacement_x",
+          "type": "scalar",
+          "vector_components": "x",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "x 方向位移分量，m。"
+        },
+        {
+          "raw_name": "U2",
+          "physical_name": "displacement_y",
+          "type": "scalar",
+          "vector_components": "y",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "U3",
+          "physical_name": "displacement_z",
+          "type": "scalar",
+          "vector_components": "z",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "UR1",
+          "physical_name": "rotation_x",
+          "type": "scalar",
+          "vector_components": "x",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "绕 x 轴转角，rad。壳/梁单元有此自由度。"
+        },
+        {
+          "raw_name": "UR2",
+          "physical_name": "rotation_y",
+          "type": "scalar",
+          "vector_components": "y",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "UR3",
+          "physical_name": "rotation_z",
+          "type": "scalar",
+          "vector_components": "z",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "V",
+          "physical_name": "velocity_structural",
+          "type": "vector",
+          "vector_components": "xyz",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "高",
+          "notes": "【重要区分】结构动力学中的节点速度（m/s），与 CFD 流速变量同名但完全不同。必须确认文件来自 Abaqus 才能用此映射。"
+        },
+        {
+          "raw_name": "V1",
+          "physical_name": "velocity_structural_x",
+          "type": "scalar",
+          "vector_components": "x",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "高",
+          "notes": "同上。"
+        },
+        {
+          "raw_name": "A",
+          "physical_name": "acceleration",
+          "type": "vector",
+          "vector_components": "xyz",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "节点加速度，m/s²。"
+        },
+        {
+          "raw_name": "S",
+          "physical_name": "stress_tensor",
+          "type": "tensor",
+          "vector_components": "S11/S22/S33/S12/S13/S23",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "Cauchy 应力张量（6分量），Pa。"
+        },
+        {
+          "raw_name": "S11",
+          "physical_name": "stress_xx",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "x 方向正应力，Pa。"
+        },
+        {
+          "raw_name": "S22",
+          "physical_name": "stress_yy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "S33",
+          "physical_name": "stress_zz",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "S12",
+          "physical_name": "stress_xy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "剪切应力，Pa。"
+        },
+        {
+          "raw_name": "S13",
+          "physical_name": "stress_xz",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "S23",
+          "physical_name": "stress_yz",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "MISES",
+          "physical_name": "von_mises_stress",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "Von Mises 等效应力，Pa。结构强度评估最常用的标量指标。"
+        },
+        {
+          "raw_name": "PEEQ",
+          "physical_name": "equivalent_plastic_strain",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "等效塑性应变，无量纲。"
+        },
+        {
+          "raw_name": "PRESS",
+          "physical_name": "hydrostatic_pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "静水压力（应力球量），Pa。注意与 CFD 流体压力（pressure）含义不同。"
+        },
+        {
+          "raw_name": "TRESCA",
+          "physical_name": "tresca_stress",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "Tresca 等效应力，Pa。"
+        },
+        {
+          "raw_name": "E",
+          "physical_name": "strain_tensor",
+          "type": "tensor",
+          "vector_components": "E11/E22/E33/E12/E13/E23",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "总应变张量（6分量），无量纲。"
+        },
+        {
+          "raw_name": "E11",
+          "physical_name": "strain_xx",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "x 方向正应变，无量纲。"
+        },
+        {
+          "raw_name": "EE",
+          "physical_name": "elastic_strain_tensor",
+          "type": "tensor",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "弹性应变，无量纲。"
+        },
+        {
+          "raw_name": "PE",
+          "physical_name": "plastic_strain_tensor",
+          "type": "tensor",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "塑性应变，无量纲。"
+        },
+        {
+          "raw_name": "LE",
+          "physical_name": "logarithmic_strain",
+          "type": "tensor",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "对数应变（大变形分析），无量纲。"
+        },
+        {
+          "raw_name": "NT",
+          "physical_name": "temperature",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "节点温度，K 或 °C（取决于分析设置），使用前需确认单位。"
+        },
+        {
+          "raw_name": "NT11",
+          "physical_name": "temperature",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "NT 的另一种表示形式，含义相同。"
+        },
+        {
+          "raw_name": "HFL",
+          "physical_name": "heat_flux",
+          "type": "vector",
+          "vector_components": "xyz",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "热流密度向量，W/m²。"
+        },
+        {
+          "raw_name": "HFL1",
+          "physical_name": "heat_flux_x",
+          "type": "scalar",
+          "vector_components": "x",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "CPRESS",
+          "physical_name": "contact_pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "接触压力，Pa。接触分析输出。"
+        },
+        {
+          "raw_name": "CSHEAR",
+          "physical_name": "contact_shear",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "接触剪切力，Pa。"
+        },
+        {
+          "raw_name": "COPEN",
+          "physical_name": "contact_opening",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "接触间隙，m。"
+        },
+        {
+          "raw_name": "ELSE",
+          "physical_name": "elastic_strain_energy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "弹性应变能密度，J/m³。"
+        },
+        {
+          "raw_name": "PENER",
+          "physical_name": "plastic_dissipation",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "塑性耗散能量密度，J/m³。"
+        },
+        {
+          "raw_name": "FREQ",
+          "physical_name": "natural_frequency",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "固有频率，Hz。频率提取分析输出。"
+        }
+      ]
+    },
+    "cfdpp": {
+      "solver_name": "CFD++ (Metacomp Technologies)",
+      "description": "文件格式：CGNS / Tecplot PLT / 自有 .cfd  |  守恒量形式：rho/rhou/rhov/rhow/rhoE 是原始守恒变量，需除以密度换算  |  导出 CGNS 时遵循 SIDS 命名",
+      "detection": null,
+      "mappings": [
+        {
+          "raw_name": "rho",
+          "physical_name": "density",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "密度，kg/m³。CFD++ 可压缩流标准变量。"
+        },
+        {
+          "raw_name": "rhou",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷rho→m/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "x 方向动量密度（ρu），kg/(m²·s），需除以密度换算为速度。"
+        },
+        {
+          "raw_name": "rhov",
+          "physical_name": "velocity_y",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷rho→m/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "y 方向动量密度（ρv）。"
+        },
+        {
+          "raw_name": "rhow",
+          "physical_name": "velocity_z",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷rho→m/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "z 方向动量密度（ρw）。"
+        },
+        {
+          "raw_name": "rhoE",
+          "physical_name": "total_energy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷rho→J/kg",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "总能量密度（ρE），J/m³，除以密度得单位质量总能量。"
+        },
+        {
+          "raw_name": "p",
+          "physical_name": "pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "静压 Pa。CFD++ 可压缩流中 p 是真实静压。"
+        },
+        {
+          "raw_name": "u",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "速度 x 分量（后处理导出时可能直接输出原始速度）。"
+        },
+        {
+          "raw_name": "v",
+          "physical_name": "velocity_y",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "w",
+          "physical_name": "velocity_z",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "T",
+          "physical_name": "temperature",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "静温，K。"
+        },
+        {
+          "raw_name": "Mach",
+          "physical_name": "mach_number",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Cp",
+          "physical_name": "pressure_coefficient",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "mut",
+          "physical_name": "nut",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷rho→m²/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "动力湍流粘性 μt，Pa·s。"
+        },
+        {
+          "raw_name": "k",
+          "physical_name": "tke",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "湍动能。"
+        },
+        {
+          "raw_name": "omega",
+          "physical_name": "sdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "k-ω 模型。"
+        },
+        {
+          "raw_name": "epsilon",
+          "physical_name": "tdr",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "k-ε 模型。"
+        },
+        {
+          "raw_name": "yplus",
+          "physical_name": "y_plus",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "cf",
+          "physical_name": "skin_friction_coeff",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "vorticity",
+          "physical_name": "vorticity_magnitude",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": "部分版本输出此变量。"
+        },
+        {
+          "raw_name": "Q",
+          "physical_name": "q_criterion",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "MEDIUM",
+          "ambiguity_risk": "低",
+          "notes": "部分版本输出。"
+        },
+        {
+          "raw_name": "Density",
+          "physical_name": "density",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "CFD++ 导出 CGNS 时遵循 SIDS 命名，此时置信度 HIGH。"
+        },
+        {
+          "raw_name": "MomentumX",
+          "physical_name": "velocity_x",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷rho→m/s",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "CFD++ 导出 CGNS 时的动量密度命名。"
+        },
+        {
+          "raw_name": "EnergyStagnationDensity",
+          "physical_name": "total_energy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": "÷rho→J/kg",
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "CGNS SIDS 标准命名，CFD++ 导出 CGNS 时使用。"
+        }
+      ]
+    },
+    "lsdyna": {
+      "solver_name": "LS-DYNA（显式动力学 / 碰撞 / 冲击 / 金属成形）",
+      "description": "文件格式：d3plot（二进制序列）/ binout / ascii  |  变量名全大写下划线风格  |  V=结构节点速度（≠CFD流速），PRESSURE=静水压力（≠CFD流体压力）",
+      "detection": null,
+      "mappings": [
+        {
+          "raw_name": "X_DISPLACEMENT",
+          "physical_name": "displacement_x",
+          "type": "scalar",
+          "vector_components": "x",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "节点 x 方向位移，m。LS-DYNA 变量名全大写加下划线风格。"
+        },
+        {
+          "raw_name": "Y_DISPLACEMENT",
+          "physical_name": "displacement_y",
+          "type": "scalar",
+          "vector_components": "y",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Z_DISPLACEMENT",
+          "physical_name": "displacement_z",
+          "type": "scalar",
+          "vector_components": "z",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "X_VELOCITY",
+          "physical_name": "velocity_structural_x",
+          "type": "scalar",
+          "vector_components": "x",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "高",
+          "notes": "【重要区分】结构节点速度，m/s，与 CFD 流速完全不同，确认文件来源再使用。"
+        },
+        {
+          "raw_name": "Y_VELOCITY",
+          "physical_name": "velocity_structural_y",
+          "type": "scalar",
+          "vector_components": "y",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "高",
+          "notes": "同上。"
+        },
+        {
+          "raw_name": "Z_VELOCITY",
+          "physical_name": "velocity_structural_z",
+          "type": "scalar",
+          "vector_components": "z",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "高",
+          "notes": "同上。"
+        },
+        {
+          "raw_name": "X_ACCELERATION",
+          "physical_name": "acceleration_x",
+          "type": "scalar",
+          "vector_components": "x",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "节点加速度，m/s²。"
+        },
+        {
+          "raw_name": "Y_ACCELERATION",
+          "physical_name": "acceleration_y",
+          "type": "scalar",
+          "vector_components": "y",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "Z_ACCELERATION",
+          "physical_name": "acceleration_z",
+          "type": "scalar",
+          "vector_components": "z",
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "STRESS_XX",
+          "physical_name": "stress_xx",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "x 方向正应力，Pa。"
+        },
+        {
+          "raw_name": "STRESS_YY",
+          "physical_name": "stress_yy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "STRESS_ZZ",
+          "physical_name": "stress_zz",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "STRESS_XY",
+          "physical_name": "stress_xy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "剪切应力，Pa。"
+        },
+        {
+          "raw_name": "STRESS_YZ",
+          "physical_name": "stress_yz",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "STRESS_ZX",
+          "physical_name": "stress_zx",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "EFF_STRESS",
+          "physical_name": "von_mises_stress",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "Von Mises 等效应力（有效应力），Pa。碰撞分析最常用指标。"
+        },
+        {
+          "raw_name": "PRESSURE",
+          "physical_name": "hydrostatic_pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "静水压力（应力球量，= -(S11+S22+S33)/3），Pa。与 CFD 流体压力不同。"
+        },
+        {
+          "raw_name": "EFF_PSTRAIN",
+          "physical_name": "equivalent_plastic_strain",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "等效塑性应变，无量纲。碰撞/成形分析的关键失效判断指标。"
+        },
+        {
+          "raw_name": "STRAIN_XX",
+          "physical_name": "strain_xx",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "工程应变，无量纲。"
+        },
+        {
+          "raw_name": "STRAIN_YY",
+          "physical_name": "strain_yy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "STRAIN_ZZ",
+          "physical_name": "strain_zz",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": null
+        },
+        {
+          "raw_name": "INT_ENERGY",
+          "physical_name": "internal_energy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "单元内能，J。评估吸能结构的能量吸收。"
+        },
+        {
+          "raw_name": "KIN_ENERGY",
+          "physical_name": "kinetic_energy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "单元动能，J。"
+        },
+        {
+          "raw_name": "HOURGLASS_ENERGY",
+          "physical_name": "hourglass_energy",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "沙漏能，J。数值稳定性指标，理想情况应远小于内能（< 5%）。"
+        },
+        {
+          "raw_name": "FAILURE",
+          "physical_name": "failure_flag",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "单元失效标志，0=未失效，1=失效已删除。"
+        },
+        {
+          "raw_name": "CONTACT_FORCE",
+          "physical_name": "contact_force",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "接触力，N。"
+        },
+        {
+          "raw_name": "CONTACT_PRESSURE",
+          "physical_name": "contact_pressure",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "接触压力，Pa。"
+        },
+        {
+          "raw_name": "THICKNESS",
+          "physical_name": "shell_thickness",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "低",
+          "notes": "壳单元当前厚度，m。成形分析中监测减薄率的关键量。"
+        },
+        {
+          "raw_name": "TEMPERATURE",
+          "physical_name": "temperature",
+          "type": "scalar",
+          "vector_components": null,
+          "conversion": null,
+          "confidence": "HIGH",
+          "ambiguity_risk": "中",
+          "notes": "节点温度，K 或 °C，需确认单位设置。热-力耦合或爆炸燃烧分析才有此变量。"
+        }
+      ]
+    }
   },
-  "density": {
-    "standard_name": "density",
-    "display_name": "Density",
-    "unit": "kg/m^3",
-    "aliases": [
-      "Density",
-      "rho",
-      "DENS",
-      "density"
-    ]
+  "standard_quantities": {
+    "pressure": {
+      "display_name": "静压（真实）",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": "真实静压。Fluent/CFX/OpenFOAM可压均输出此量。"
+    },
+    "pressure_kinematic": {
+      "display_name": "运动压力",
+      "unit": "m²/s²",
+      "type": "scalar",
+      "notes": "#NAME?"
+    },
+    "pressure_total": {
+      "display_name": "总压",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": null
+    },
+    "pressure_coefficient": {
+      "display_name": "压力系数 Cp",
+      "unit": null,
+      "type": "scalar",
+      "notes": null
+    },
+    "pressure_dynamic": {
+      "display_name": "动压",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": null
+    },
+    "velocity_x": {
+      "display_name": "x方向速度",
+      "unit": "m/s",
+      "type": "scalar",
+      "notes": "笛卡尔坐标 x 分量。"
+    },
+    "velocity_y": {
+      "display_name": "y方向速度",
+      "unit": "m/s",
+      "type": "scalar",
+      "notes": null
+    },
+    "velocity_z": {
+      "display_name": "z方向速度",
+      "unit": "m/s",
+      "type": "scalar",
+      "notes": null
+    },
+    "velocity_magnitude": {
+      "display_name": "速度幅值",
+      "unit": "m/s",
+      "type": "scalar",
+      "notes": null
+    },
+    "mach_number": {
+      "display_name": "马赫数",
+      "unit": null,
+      "type": "scalar",
+      "notes": null
+    },
+    "density": {
+      "display_name": "密度",
+      "unit": "kg/m³",
+      "type": "scalar",
+      "notes": "海平面空气约1.225 kg/m³。"
+    },
+    "temperature": {
+      "display_name": "静温",
+      "unit": "K",
+      "type": "scalar",
+      "notes": "单位为开尔文。海平面约288K，注意与摄氏度区分。"
+    },
+    "total_energy": {
+      "display_name": "总能量",
+      "unit": "J/kg",
+      "type": "scalar",
+      "notes": null
+    },
+    "internal_energy": {
+      "display_name": "内能",
+      "unit": "J/kg",
+      "type": "scalar",
+      "notes": null
+    },
+    "heat_flux": {
+      "display_name": "热流密度",
+      "unit": "W/m²",
+      "type": "vector",
+      "notes": "热量传递速率，向量场。"
+    },
+    "heat_flux_magnitude": {
+      "display_name": "热流密度幅值",
+      "unit": "W/m²",
+      "type": "scalar",
+      "notes": "热流密度向量的幅值。"
+    },
+    "tke": {
+      "display_name": "湍动能 k",
+      "unit": "m²/s²",
+      "type": "scalar",
+      "notes": "k-ε 和 k-ω 模型均有，恒为正值。"
+    },
+    "tdr": {
+      "display_name": "湍动能耗散率 ε",
+      "unit": "m²/s³",
+      "type": "scalar",
+      "notes": "k-ε 模型专用。近壁面处极高，恒为正值。"
+    },
+    "sdr": {
+      "display_name": "比耗散率 ω",
+      "unit": "1/s",
+      "type": "scalar",
+      "notes": "k-ω 模型专用，近壁面处极高（可达10⁶），注意与 ε 区分。"
+    },
+    "nut": {
+      "display_name": "运动湍流粘性 νt",
+      "unit": "m²/s",
+      "type": "scalar",
+      "notes": "空气约1.5×10⁻⁵ m²/s，湍流粘性比通常1~1000。"
+    },
+    "turbulence_intensity": {
+      "display_name": "湍流强度",
+      "unit": null,
+      "type": "scalar",
+      "notes": null
+    },
+    "wall_shear_stress": {
+      "display_name": "壁面剪切力",
+      "unit": "Pa",
+      "type": "scalar/vector",
+      "notes": "向量或幅值，取决于上下文，恒为正（幅值）。"
+    },
+    "y_plus": {
+      "display_name": "y+",
+      "unit": null,
+      "type": "scalar",
+      "notes": "无量纲壁面距离。低雷诺数模型要求y+<1，壁函数法30~300。"
+    },
+    "skin_friction_coeff": {
+      "display_name": "摩擦系数 Cf",
+      "unit": null,
+      "type": "scalar",
+      "notes": null
+    },
+    "vorticity_x": {
+      "display_name": "x涡量",
+      "unit": "1/s",
+      "type": "scalar",
+      "notes": "ωx = ∂w/∂y - ∂v/∂z"
+    },
+    "vorticity_y": {
+      "display_name": "y涡量",
+      "unit": "1/s",
+      "type": "scalar",
+      "notes": null
+    },
+    "vorticity_z": {
+      "display_name": "z涡量",
+      "unit": "1/s",
+      "type": "scalar",
+      "notes": null
+    },
+    "vorticity_magnitude": {
+      "display_name": "涡量幅值",
+      "unit": "1/s",
+      "type": "scalar",
+      "notes": null
+    },
+    "q_criterion": {
+      "display_name": "Q准则",
+      "unit": "1/s²",
+      "type": "scalar",
+      "notes": "Q = 0.5(|Ω|²-|S|²)，Q>0区域为涡结构。可正可负。"
+    },
+    "displacement_x": {
+      "display_name": "x方向位移",
+      "unit": "m",
+      "type": "scalar",
+      "notes": "节点位移 x 分量。Abaqus: U1，LS-DYNA: X_DISPLACEMENT。"
+    },
+    "displacement_y": {
+      "display_name": "y方向位移",
+      "unit": "m",
+      "type": "scalar",
+      "notes": null
+    },
+    "displacement_z": {
+      "display_name": "z方向位移",
+      "unit": "m",
+      "type": "scalar",
+      "notes": null
+    },
+    "displacement_magnitude": {
+      "display_name": "位移幅值",
+      "unit": "m",
+      "type": "scalar",
+      "notes": null
+    },
+    "rotation_x": {
+      "display_name": "绕x轴转角",
+      "unit": "rad",
+      "type": "scalar",
+      "notes": "壳/梁单元的旋转自由度。Abaqus: UR1。"
+    },
+    "rotation_y": {
+      "display_name": "绕y轴转角",
+      "unit": "rad",
+      "type": "scalar",
+      "notes": null
+    },
+    "rotation_z": {
+      "display_name": "绕z轴转角",
+      "unit": "rad",
+      "type": "scalar",
+      "notes": null
+    },
+    "velocity_structural_x": {
+      "display_name": "结构节点速度x",
+      "unit": "m/s",
+      "type": "scalar",
+      "notes": "【重要区分】结构动力学节点速度，与CFD流速物理含义完全不同，不可混用。Abaqus: V1，LS-DYNA: X_VELOCITY。"
+    },
+    "velocity_structural_y": {
+      "display_name": "结构节点速度y",
+      "unit": "m/s",
+      "type": "scalar",
+      "notes": "同上。"
+    },
+    "velocity_structural_z": {
+      "display_name": "结构节点速度z",
+      "unit": "m/s",
+      "type": "scalar",
+      "notes": "同上。"
+    },
+    "acceleration_x": {
+      "display_name": "节点加速度x",
+      "unit": "m/s²",
+      "type": "scalar",
+      "notes": "Abaqus: A1，LS-DYNA: X_ACCELERATION。"
+    },
+    "acceleration_y": {
+      "display_name": "节点加速度y",
+      "unit": "m/s²",
+      "type": "scalar",
+      "notes": null
+    },
+    "acceleration_z": {
+      "display_name": "节点加速度z",
+      "unit": "m/s²",
+      "type": "scalar",
+      "notes": null
+    },
+    "stress_xx": {
+      "display_name": "x方向正应力",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": "Cauchy应力张量分量。Abaqus: S11，LS-DYNA: STRESS_XX。"
+    },
+    "stress_yy": {
+      "display_name": "y方向正应力",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": null
+    },
+    "stress_zz": {
+      "display_name": "z方向正应力",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": null
+    },
+    "stress_xy": {
+      "display_name": "xy剪切应力",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": null
+    },
+    "stress_yz": {
+      "display_name": "yz剪切应力",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": null
+    },
+    "stress_zx": {
+      "display_name": "zx剪切应力",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": null
+    },
+    "von_mises_stress": {
+      "display_name": "Von Mises等效应力",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": "强度评估最常用标量指标，恒为正值。Abaqus: MISES，LS-DYNA: EFF_STRESS。"
+    },
+    "tresca_stress": {
+      "display_name": "Tresca等效应力",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": "#NAME?"
+    },
+    "hydrostatic_pressure": {
+      "display_name": "静水压力",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": null
+    },
+    "stress_tensor": {
+      "display_name": "应力张量",
+      "unit": "Pa",
+      "type": "tensor(6)",
+      "notes": "6分量完整张量：S11/S22/S33/S12/S13/S23。"
+    },
+    "strain_xx": {
+      "display_name": "x方向正应变",
+      "unit": null,
+      "type": "scalar",
+      "notes": "工程应变，无量纲。Abaqus: E11，LS-DYNA: STRAIN_XX。"
+    },
+    "strain_yy": {
+      "display_name": "y方向正应变",
+      "unit": null,
+      "type": "scalar",
+      "notes": null
+    },
+    "strain_zz": {
+      "display_name": "z方向正应变",
+      "unit": null,
+      "type": "scalar",
+      "notes": null
+    },
+    "strain_xy": {
+      "display_name": "xy剪切应变",
+      "unit": null,
+      "type": "scalar",
+      "notes": null
+    },
+    "strain_tensor": {
+      "display_name": "应变张量",
+      "unit": null,
+      "type": "tensor(6)",
+      "notes": "6分量完整张量。"
+    },
+    "elastic_strain_tensor": {
+      "display_name": "弹性应变张量",
+      "unit": null,
+      "type": "tensor(6)",
+      "notes": "Abaqus: EE。"
+    },
+    "plastic_strain_tensor": {
+      "display_name": "塑性应变张量",
+      "unit": null,
+      "type": "tensor(6)",
+      "notes": "Abaqus: PE。"
+    },
+    "equivalent_plastic_strain": {
+      "display_name": "等效塑性应变",
+      "unit": null,
+      "type": "scalar",
+      "notes": "恒为正值，失效判断关键指标。Abaqus: PEEQ，LS-DYNA: EFF_PSTRAIN。"
+    },
+    "logarithmic_strain": {
+      "display_name": "对数应变",
+      "unit": null,
+      "type": "tensor(6)",
+      "notes": "大变形分析专用。Abaqus: LE。"
+    },
+    "contact_pressure": {
+      "display_name": "接触压力",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": "接触界面法向压力，恒为正值（压）。Abaqus: CPRESS，LS-DYNA: CONTACT_PRESSURE。"
+    },
+    "contact_shear": {
+      "display_name": "接触剪切力",
+      "unit": "Pa",
+      "type": "scalar",
+      "notes": "接触界面切向力。Abaqus: CSHEAR。"
+    },
+    "contact_opening": {
+      "display_name": "接触间隙",
+      "unit": "m",
+      "type": "scalar",
+      "notes": "接触面间隙距离。Abaqus: COPEN。"
+    },
+    "contact_force": {
+      "display_name": "接触力",
+      "unit": "N",
+      "type": "scalar",
+      "notes": "LS-DYNA: CONTACT_FORCE。"
+    },
+    "internal_energy_structural": {
+      "display_name": "结构内能",
+      "unit": "J",
+      "type": "scalar",
+      "notes": "单元内能。【区分】与热力学内能(internal_energy, J/kg)量纲不同。LS-DYNA: INT_ENERGY。"
+    },
+    "kinetic_energy": {
+      "display_name": "动能",
+      "unit": "J",
+      "type": "scalar",
+      "notes": "单元动能。LS-DYNA: KIN_ENERGY。"
+    },
+    "elastic_strain_energy": {
+      "display_name": "弹性应变能密度",
+      "unit": "J/m³",
+      "type": "scalar",
+      "notes": "Abaqus: ELSE。"
+    },
+    "plastic_dissipation": {
+      "display_name": "塑性耗散能量密度",
+      "unit": "J/m³",
+      "type": "scalar",
+      "notes": "Abaqus: PENER。"
+    },
+    "hourglass_energy": {
+      "display_name": "沙漏能",
+      "unit": "J",
+      "type": "scalar",
+      "notes": "数值稳定性指标，应远小于内能（<5%为合格）。LS-DYNA: HOURGLASS_ENERGY。"
+    },
+    "failure_flag": {
+      "display_name": "单元失效标志",
+      "unit": null,
+      "type": "scalar",
+      "notes": "0=未失效，1=已删除。LS-DYNA: FAILURE。"
+    },
+    "shell_thickness": {
+      "display_name": "壳单元厚度",
+      "unit": "m",
+      "type": "scalar",
+      "notes": "成形分析监测减薄率的关键量。LS-DYNA: THICKNESS。"
+    },
+    "natural_frequency": {
+      "display_name": "固有频率",
+      "unit": "Hz",
+      "type": "scalar",
+      "notes": "频率提取分析输出。Abaqus: FREQ。"
+    },
+    "temperature_nodal": {
+      "display_name": "节点温度",
+      "unit": "K或°C",
+      "type": "scalar",
+      "notes": "热分析专用节点温度，需确认单位设置（K或°C）。Abaqus: NT/NT11，LS-DYNA: TEMPERATURE。与流体静温(temperature)定义相同，但来源不同。"
+    },
+    "residual": {
+      "display_name": "残差",
+      "unit": null,
+      "type": "scalar",
+      "notes": "来自求解器日志文件，非流场变量，以变量名后缀区分如 residual_p。"
+    }
   },
-  "velocity_x": {
-    "standard_name": "velocity_x",
-    "display_name": "Velocity X",
-    "unit": "m/s",
-    "aliases": [
-      "X_Velocity",
-      "VelocityX",
-      "Ux",
-      "U_X",
-      "velocity_x"
-    ]
+  "value_ranges": {
+    "pressure": {
+      "display_name": "真实静压",
+      "min": -5000.0,
+      "max": 300000.0,
+      "unit": "Pa",
+      "notes": "海平面大气压 101325 Pa。低速流场范围约 90000~110000；高速/高空场景更宽。若值域在 -500~5000，可能是运动压力，需换算。"
+    },
+    "pressure_kinematic": {
+      "display_name": "运动压力",
+      "min": -500.0,
+      "max": 5000.0,
+      "unit": "m²/s²",
+      "notes": null
+    },
+    "pressure_total": {
+      "display_name": "总压",
+      "min": 90000.0,
+      "max": 400000.0,
+      "unit": "Pa",
+      "notes": "必然 ≥ 静压，低速流约 101500~105000 Pa。"
+    },
+    "pressure_coefficient": {
+      "display_name": "压力系数 Cp",
+      "min": -10.0,
+      "max": 1.5,
+      "unit": null,
+      "notes": "无量纲。Cp 上界理论值为 1（驻点），下界取决于马赫数。若值域 >>1 或 <<-10，可能是压力不是 Cp。"
+    },
+    "pressure_dynamic": {
+      "display_name": "动压",
+      "min": 0.0,
+      "max": 50000.0,
+      "unit": "Pa",
+      "notes": null
+    },
+    "velocity_x": {
+      "display_name": "x速度分量",
+      "min": -500.0,
+      "max": 500.0,
+      "unit": "m/s",
+      "notes": "亚声速流 <340 m/s；超声速流可达数千。若值域在 0.01~100 量级且与坐标量级重合，需结合 y/z 变量值域综合判断是否为坐标。"
+    },
+    "velocity_y": {
+      "display_name": "y速度分量",
+      "min": -500.0,
+      "max": 500.0,
+      "unit": "m/s",
+      "notes": "同上。"
+    },
+    "velocity_z": {
+      "display_name": "z速度分量",
+      "min": -500.0,
+      "max": 500.0,
+      "unit": "m/s",
+      "notes": "同上。"
+    },
+    "velocity_magnitude": {
+      "display_name": "速度幅值",
+      "min": 0.0,
+      "max": 1000.0,
+      "unit": "m/s",
+      "notes": "恒为正值（幅值）。若出现负值，说明变量不是速度幅值，可能是某方向分量。"
+    },
+    "mach_number": {
+      "display_name": "马赫数",
+      "min": 0.0,
+      "max": 15.0,
+      "unit": null,
+      "notes": "无量纲，亚声速 <1，超声速 1~5，高超 >5。若值域超出此范围，变量很可能不是马赫数。"
+    },
+    "coordinate_x": {
+      "display_name": "x坐标",
+      "min": -100.0,
+      "max": 100.0,
+      "unit": "m",
+      "notes": "【区分坐标与速度的关键】坐标量级取决于模型尺寸。飞机模型通常 0.1~20 m；风洞模型 0.01~2 m。速度量级通常 0~500 m/s。若 x/y/z 值域与模型尺寸量级一致（远小于速度量级），则为坐标。"
+    },
+    "coordinate_y": {
+      "display_name": "y坐标",
+      "min": -100.0,
+      "max": 100.0,
+      "unit": "m",
+      "notes": "同上。"
+    },
+    "coordinate_z": {
+      "display_name": "z坐标",
+      "min": -100.0,
+      "max": 100.0,
+      "unit": "m",
+      "notes": "同上。"
+    },
+    "temperature": {
+      "display_name": "静温",
+      "min": 100.0,
+      "max": 3000.0,
+      "unit": "K",
+      "notes": "海平面约 288 K；高空约 200 K；高超声速气动热可达 3000 K 以上。若值域在 -50~200 范围，可能是摄氏度（°C），需确认单位。"
+    },
+    "density": {
+      "display_name": "密度",
+      "min": 0.001,
+      "max": 1000.0,
+      "unit": "kg/m³",
+      "notes": "海平面空气约 1.225 kg/m³；高空 0.01 量级；液态水 1000。"
+    },
+    "tke": {
+      "display_name": "湍动能 k",
+      "min": 0.0,
+      "max": 500.0,
+      "unit": "m²/s²",
+      "notes": "恒为正值。典型外流场 0.01~10；高湍流区可达 100 量级。若出现负值，可能是残差数据或变量识别有误。"
+    },
+    "tdr": {
+      "display_name": "湍动能耗散率ε",
+      "min": 0.0,
+      "max": 100000.0,
+      "unit": "m²/s³",
+      "notes": "变化范围极大（近壁面处可极高）。恒为正值。"
+    },
+    "sdr": {
+      "display_name": "比耗散率 ω",
+      "min": 0.0,
+      "max": 1000000.0,
+      "unit": "1/s",
+      "notes": "近壁面处极高（可达 10^6），远场约 1~100。恒为正值。"
+    },
+    "nut": {
+      "display_name": "运动湍流粘性",
+      "min": 0.0,
+      "max": 1.0,
+      "unit": "m²/s",
+      "notes": "空气运动粘性约 1.5×10^-5 m²/s，湍流粘性比（μt/μ）通常 1~1000，对应 nut 约 10^-5~10^-2。"
+    },
+    "y_plus": {
+      "display_name": "y+",
+      "min": 0.0,
+      "max": 1000.0,
+      "unit": null,
+      "notes": "无量纲。低雷诺数模型要求 y+<1；高雷诺数壁函数 30<y+<300。若值域远超 1000，网格第一层可能过粗。"
+    },
+    "wall_shear_stress": {
+      "display_name": "壁面剪切力",
+      "min": 0.0,
+      "max": 5000.0,
+      "unit": "Pa",
+      "notes": "恒为正值（幅值）。低速流约 0.1~10 Pa；高速流可达数百 Pa。"
+    },
+    "skin_friction_coeff": {
+      "display_name": "摩擦系数 Cf",
+      "min": 0.0,
+      "max": 0.1,
+      "unit": null,
+      "notes": "无量纲，典型值 0.001~0.01。若值域超出 0~1 范围，可能是变量识别有误。"
+    },
+    "vorticity_magnitude": {
+      "display_name": "涡量幅值",
+      "min": 0.0,
+      "max": 100000.0,
+      "unit": "1/s",
+      "notes": "恒为正值。近壁面和分离区较高；远场接近 0。"
+    },
+    "q_criterion": {
+      "display_name": "Q准则",
+      "min": -1000000.0,
+      "max": 1000000.0,
+      "unit": "1/s²",
+      "notes": "可正可负。Q>0 的区域被识别为涡结构。值域范围因流场差异极大，不适合用于变量识别，仅用于排除明显错误。"
+    }
   },
-  "velocity_y": {
-    "standard_name": "velocity_y",
-    "display_name": "Velocity Y",
-    "unit": "m/s",
-    "aliases": [
-      "Y_Velocity",
-      "VelocityY",
-      "Uy",
-      "U_Y",
-      "velocity_y"
-    ]
-  },
-  "velocity_z": {
-    "standard_name": "velocity_z",
-    "display_name": "Velocity Z",
-    "unit": "m/s",
-    "aliases": [
-      "Z_Velocity",
-      "VelocityZ",
-      "Uz",
-      "U_Z",
-      "velocity_z"
-    ]
-  },
-  "temperature": {
-    "standard_name": "temperature",
-    "display_name": "Temperature",
-    "unit": "K",
-    "aliases": [
-      "Temperature",
-      "Static_Temperature",
-      "T",
-      "TEMP",
-      "temperature"
-    ]
-  },
-  "mach": {
-    "standard_name": "mach",
-    "display_name": "Mach Number",
-    "unit": "",
-    "aliases": [
-      "Mach_Number",
-      "Mach",
-      "Ma",
-      "mach"
-    ]
-  },
-  "cp": {
-    "standard_name": "cp",
-    "display_name": "Pressure Coefficient",
-    "unit": "",
-    "aliases": [
-      "Pressure_Coefficient",
-      "CoefPressure",
-      "Cp",
-      "cp",
-      "C_P"
-    ]
-  }
+  "ambiguity_table": [
+    {
+      "raw_name": "p",
+      "solver_context": "OpenFOAM 不可压（simpleFoam等）",
+      "actual_meaning": "运动压力 p/ρ",
+      "unit": "m²/s²",
+      "handling": "×ρ 换算为真实压力 Pa，再进行积分"
+    },
+    {
+      "raw_name": "p",
+      "solver_context": "OpenFOAM 可压（rhoCentralFoam等）",
+      "actual_meaning": "真实静压",
+      "unit": "Pa",
+      "handling": "直接使用"
+    },
+    {
+      "raw_name": "p",
+      "solver_context": "Fluent",
+      "actual_meaning": "表压（操作压力偏移）",
+      "unit": "Pa",
+      "handling": "+操作压力（通常101325Pa）→绝对压"
+    },
+    {
+      "raw_name": "p",
+      "solver_context": "CFX",
+      "actual_meaning": "绝对静压",
+      "unit": "Pa",
+      "handling": "直接使用"
+    },
+    {
+      "raw_name": "p",
+      "solver_context": "Tecplot（通用）",
+      "actual_meaning": "由写入方决定",
+      "unit": "不确定",
+      "handling": "结合值域范围判断：若量级在-1000~10000→可能是Pa；若在-1~100→可能是运动压力"
+    },
+    {
+      "raw_name": "U",
+      "solver_context": "OpenFOAM",
+      "actual_meaning": "速度向量",
+      "unit": "m/s",
+      "handling": "U[0/1/2] 分别是 x/y/z 分量"
+    },
+    {
+      "raw_name": "U",
+      "solver_context": "Tecplot",
+      "actual_meaning": "可能是速度幅值",
+      "unit": "m/s",
+      "handling": "需确认是向量还是标量"
+    },
+    {
+      "raw_name": "mut",
+      "solver_context": "OpenFOAM 可压 / Fluent / CFX",
+      "actual_meaning": "动力湍流粘性 μt",
+      "unit": "Pa·s",
+      "handling": "÷ρ → 运动湍流粘性 νt (m²/s)"
+    },
+    {
+      "raw_name": "nut",
+      "solver_context": "OpenFOAM 不可压",
+      "actual_meaning": "运动湍流粘性 νt",
+      "unit": "m²/s",
+      "handling": "直接使用，无需换算"
+    },
+    {
+      "raw_name": "MomentumX",
+      "solver_context": "CGNS",
+      "actual_meaning": "动量密度 ρu",
+      "unit": "kg/(m²·s)",
+      "handling": "÷ρ → 速度分量 u (m/s)"
+    },
+    {
+      "raw_name": "x",
+      "solver_context": "Tecplot",
+      "actual_meaning": "坐标 或 x速度分量",
+      "unit": "m 或 m/s",
+      "handling": "结合值域范围判断，坐标量级通常远大于速度"
+    },
+    {
+      "raw_name": "Q",
+      "solver_context": "Tecplot",
+      "actual_meaning": "Q准则 或 流量",
+      "unit": "不确定",
+      "handling": "结合值域范围和其他变量共同判断"
+    }
+  ]
 }

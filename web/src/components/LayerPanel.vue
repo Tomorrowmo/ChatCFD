@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
+import { POST_SERVICE_URL } from '../config.js'
 import { useChatStore } from '../stores/chat.js'
 
 const props = defineProps({
@@ -42,7 +43,7 @@ async function refreshZones() {
   try {
     loadingZones.value = true
     const fileParam = props.sourceFile ? `?file=${encodeURIComponent(props.sourceFile)}` : ''
-    const resp = await fetch(`http://localhost:8000/api/zones/${sessionId.value}${fileParam}`)
+    const resp = await fetch(`${POST_SERVICE_URL}/api/zones/${sessionId.value}${fileParam}`)
     if (resp.ok) {
       const data = await resp.json()
       if (data.zones) liveZones.value = data.zones

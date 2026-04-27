@@ -34,10 +34,10 @@ class Harness:
                 return {"error": f"File too large: {size_mb:.0f}MB (limit: {self.max_file_size_mb}MB)"}
 
         # Coding confirmation check
-        if tool_name in ("run_bash", "runPythonString"):
+        if tool_name in ("run_bash", "runPythonString", "runBash", "runPython"):
             if not user_confirmed_coding:
                 return {"error": "需要用户确认后才能执行自定义代码。请先询问用户。"}
-            cmd = args.get("command", "")
+            cmd = args.get("command", "") or args.get("code", "")
             for d in self.dangerous_commands:
                 if d in cmd:
                     return {"error": f"Dangerous command blocked: {d}"}

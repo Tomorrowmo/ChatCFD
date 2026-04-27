@@ -20,6 +20,11 @@ MEMPALACE_LLM_TOOLS = {
     "mempalace_kg_add",
 }
 
+# Coding tools — hidden from LLM until user explicitly confirms coding mode.
+# Keeping them off the default tool list shrinks every request's tool schema
+# and removes the LLM's temptation to write code when a built-in tool suffices.
+CODING_TOOLS = {"runBash", "runPython"}
+
 # Mempalace has a fixed tool set — register without connecting.
 _MEMPALACE_TOOL_DEFS = [
     {"name": "mempalace_search", "description": "Semantic search across stored memories", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}, "wing": {"type": "string"}, "room": {"type": "string"}}, "required": ["query"]}},
@@ -216,14 +221,22 @@ class MCPClientPool:
     def has_tool(self, name: str) -> bool:
         return name in self._tool_route
 
-    def get_tools_for_llm(self) -> list[dict]:
-        """Return tools for LLM, with mempalace tools filtered to whitelist."""
+    def get_tools_for_llm(self, include_coding: bool = False) -> list[dict]:
+        """Return tools for LLM, with mempalace tools filtered to whitelist.
+
+        Coding tools (runBash/runPython) are hidden unless include_coding=True
+        — set this from session.user_confirmed_coding so the LLM only sees
+        them after the user has approved Coding mode.
+        """
         tools = []
         for client in self._clients.values():
             for t in client._tools_raw:
+                name = t["name"]
+                if name in CODING_TOOLS and not include_coding:
+                    continue
                 if client.name != "mempalace":
                     tools.append(self._to_openai_format(t))
-                elif t["name"] in MEMPALACE_LLM_TOOLS:
+                elif name in MEMPALACE_LLM_TOOLS:
                     tools.append(self._to_openai_format(t))
         return tools
 

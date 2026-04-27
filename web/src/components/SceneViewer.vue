@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { POST_SERVICE_URL } from '../config.js'
 import { useChatStore } from '../stores/chat.js'
 import LayerPanel from './LayerPanel.vue'
 import TimeControls from './TimeControls.vue'
@@ -89,7 +90,7 @@ async function fetchZoneScalarRanges() {
   const sf = props.meshData?.file_path || ''
   try {
     const params = sf ? `?file=${encodeURIComponent(sf)}` : ''
-    const resp = await fetch(`http://localhost:8000/api/zones/${sid}${params}`)
+    const resp = await fetch(`${POST_SERVICE_URL}/api/zones/${sid}${params}`)
     if (!resp.ok) return
     const data = await resp.json()
     if (data.scalar_ranges) {
@@ -107,7 +108,7 @@ async function precomputeFileLayerRanges(layer) {
   for (const filePath of frameFiles) {
     try {
       const safePath = filePath.split('/').map(s => encodeURIComponent(s)).join('/')
-      const resp = await fetch(`http://localhost:8000/api/file/${safePath}`)
+      const resp = await fetch(`${POST_SERVICE_URL}/api/file/${safePath}`)
       if (!resp.ok) continue
       const buffer = await resp.arrayBuffer()
       const reader = vtkXMLPolyDataReader.newInstance()
@@ -160,7 +161,7 @@ async function fetchVtpBuffer(layer, frame = 0) {
     if (sourceFile) params.set('file', sourceFile)
     if (frame > 0) params.set('frame', String(frame))
     const qs = params.toString() ? `?${params}` : ''
-    const url = `http://localhost:8000/api/surface/${sessionId}/${encodeURIComponent(zone)}${qs}`
+    const url = `${POST_SERVICE_URL}/api/surface/${sessionId}/${encodeURIComponent(zone)}${qs}`
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching zone ${zone}`)
     return resp.arrayBuffer()
@@ -172,7 +173,7 @@ async function fetchVtpBuffer(layer, frame = 0) {
       filePath = frameFiles[frame]
     }
     const safePath = filePath.split('/').map(s => encodeURIComponent(s)).join('/')
-    const url = `http://localhost:8000/api/file/${safePath}`
+    const url = `${POST_SERVICE_URL}/api/file/${safePath}`
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching file`)
     return resp.arrayBuffer()

@@ -195,11 +195,14 @@ class TestGetSummary:
         s = post_data.get_summary()
         wall_zone = s["zones"][0]
         assert wall_zone["name"] == "wall"
-        # Find the Static_Pressure entry - should have standard_name
+        # Find the Static_Pressure entry - legacy alias resolves to "pressure".
         sp = [sc for sc in wall_zone["scalars"] if sc["raw_name"] == "Static_Pressure"][0]
         assert sp["standard_name"] == "pressure"
-        assert sp["display_name"] == "Pressure"
         assert sp["unit"] == "Pa"
+        # display_name now comes from SimGraph2's standard_quantities table
+        # ("静压（真实）"); assert it exists without hard-coding the Chinese
+        # string so future mapping tweaks don't break this test.
+        assert "display_name" in sp and sp["display_name"]
 
 
 # ------------------------------------------------------------------

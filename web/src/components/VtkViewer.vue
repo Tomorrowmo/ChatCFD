@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { POST_SERVICE_URL } from '../config.js'
 
 import '@kitware/vtk.js/Rendering/Profiles/Geometry'
 import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow'
@@ -140,7 +141,7 @@ async function loadData() {
     if (props.sourceFile) params.set('file', props.sourceFile)
     if (props.frame > 0) params.set('frame', String(props.frame))
     const qs = params.toString() ? `?${params.toString()}` : ''
-    const url = `http://localhost:8000/api/surface/${props.sessionId}/${encodeURIComponent(props.zone)}${qs}`
+    const url = `${POST_SERVICE_URL}/api/surface/${props.sessionId}/${encodeURIComponent(props.zone)}${qs}`
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const vtpBuffer = await resp.arrayBuffer()
@@ -258,7 +259,7 @@ async function loadFromFile() {
   try {
     // Encode path but keep slashes intact (browser treats D: as protocol otherwise)
     const safePath = props.path.split('/').map(s => encodeURIComponent(s)).join('/')
-    const url = `http://localhost:8000/api/file/${safePath}`
+    const url = `${POST_SERVICE_URL}/api/file/${safePath}`
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const vtpBuffer = await resp.arrayBuffer()

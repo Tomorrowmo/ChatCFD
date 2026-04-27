@@ -15,6 +15,7 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     scalar = params.get("scalar")
     zone_a = params.get("zone_a")
     zone_b = params.get("zone_b")
+    post_data_b = kwargs.get("post_data_b")  # None = same file
 
     if not scalar:
         return {"error": "Parameter 'scalar' is required."}
@@ -24,11 +25,12 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     try:
         arr_a = post_data.get_scalar(zone_a, scalar)
     except ValueError as e:
-        return {"error": str(e)}
+        return {"error": f"File A: {e}"}
     try:
-        arr_b = post_data.get_scalar(zone_b, scalar)
+        source_b = post_data_b if post_data_b else post_data
+        arr_b = source_b.get_scalar(zone_b, scalar)
     except ValueError as e:
-        return {"error": str(e)}
+        return {"error": f"File B: {e}"}
 
     def _stats(arr):
         return {

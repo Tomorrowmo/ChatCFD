@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 
 import uvicorn
 from dotenv import load_dotenv
@@ -19,19 +20,89 @@ load_dotenv(override=True)
 os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
 os.environ.setdefault("no_proxy", "127.0.0.1,localhost")
 
-MODEL = os.environ.get("MODEL_ID", "qwen/qwen-plus")
-MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000/mcp/sse")
+MODEL = os.environ.get("MODEL_ID", "openai/qwen-plus")
+MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8001/mcp/sse")
 MEMPALACE_ENABLED = os.environ.get("MEMPALACE_ENABLED", "true").lower() == "true"
 LOG_DIR = os.environ.get("LOG_DIR", ".chatcfd")
 AGENT_PORT = int(os.environ.get("AGENT_PORT", "8080"))
+SETTINGS_FILE = os.path.join(LOG_DIR, "settings.json")
 
 # --- Shared state (initialized before server starts) ---
 mcp_pool = MCPClientPool()
 harness = Harness(max_file_size_mb=int(os.environ.get("MAX_FILE_SIZE_MB", "0")))  # 0 = unlimited (local mode)
 pool = SessionPool()
 
+
+def _apply_settings(s: dict):
+    """Apply a settings dict (model/api_base/api_key) to env vars + MODEL global."""
+    global MODEL
+    if s.get("model"):
+        MODEL = s["model"]
+    if s.get("api_base"):
+        os.environ["OPENAI_API_BASE"] = s["api_base"]
+        os.environ["LLM_API_BASE"] = s["api_base"]
+    if s.get("api_key"):
+        os.environ["OPENAI_API_KEY"] = s["api_key"]
+        os.environ["DASHSCOPE_API_KEY"] = s["api_key"]
+
+
+def _load_persisted_settings():
+    """Load previously-saved settings from disk, if present."""
+    if not os.path.isfile(SETTINGS_FILE):
+        return None
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        _apply_settings(data)
+        return data
+    except Exception as e:
+        print(f"[Agent] Failed to load {SETTINGS_FILE}: {e}")
+        return None
+
+
+def _persist_settings(s: dict):
+    """Write settings to disk so they survive restart. Merges with existing."""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    existing = {}
+    if os.path.isfile(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except Exception:
+            pass
+    merged = {**existing, **{k: v for k, v in s.items() if v}}
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=2)
+
+
+# --- FastAPI lifespan: init MCP pool regardless of launch mode ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Only init once — reload / multiple workers would otherwise double-register
+    if not mcp_pool._tool_route:
+        loaded = _load_persisted_settings()
+        _init_mcp_pool()
+        llm_tools = mcp_pool.get_tools_for_llm()
+        tool_names = list(mcp_pool._tool_route.keys())
+        print(f"[Agent] {len(tool_names)} total tools, {len(llm_tools)} exposed to LLM")
+        print(f"[Agent] Tools: {tool_names}")
+        print(f"[Agent] Post service at {MCP_URL}")
+        if MEMPALACE_ENABLED:
+            print(f"[Agent] Mempalace enabled")
+        print(f"[Agent] LLM model: {MODEL}")
+        api_base = os.environ.get("OPENAI_API_BASE", "(unset — will default to OpenAI)")
+        api_key_set = bool(os.environ.get("OPENAI_API_KEY"))
+        print(f"[Agent] OPENAI_API_BASE: {api_base}")
+        print(f"[Agent] OPENAI_API_KEY: {'(set)' if api_key_set else '(UNSET — LLM calls will fail)'}")
+        if loaded:
+            print(f"[Agent] Loaded persisted settings from {SETTINGS_FILE}")
+        elif not api_key_set:
+            print(f"[Agent] No persisted settings and no API key in env — open Web UI Settings to configure")
+    yield
+
+
 # --- FastAPI app ---
-app = FastAPI(title="ChatCFD Agent")
+app = FastAPI(title="ChatCFD Agent", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -95,9 +166,35 @@ async def websocket_endpoint(ws: WebSocket):
             session.messages.append({"role": "user", "content": query})
             session.cancelled = False
 
-            # Cancel previous task if still running
+            # Auto-detect coding confirmation.
+            # Path A: user responds with a confirmation word to an assistant
+            #         message that proposed coding.
+            # Path B: user directly requests custom code/script execution in
+            #         this turn (regardless of prior assistant message).
+            if not session.user_confirmed_coding:
+                q_lower = query.lower()
+
+                _CONFIRM_KW = {"可以", "好的", "允许", "同意", "yes", "ok", "确认", "没问题", "行", "授权"}
+                if any(kw in q_lower for kw in _CONFIRM_KW):
+                    prev = [m for m in session.messages if m.get("role") == "assistant"]
+                    if prev:
+                        last = prev[-1].get("content", "") or ""
+                        if any(k in last for k in ("编写", "脚本", "代码", "runBash", "runPython", "Python", "python")):
+                            session.user_confirmed_coding = True
+
+                if not session.user_confirmed_coding:
+                    _CODING_NOUN = ("python", "脚本", "代码", "runbash", "runpython")
+                    _CODING_VERB = ("用", "写", "执行", "跑", "运行", "调用")
+                    if any(n in q_lower for n in _CODING_NOUN) and any(
+                        v in query for v in _CODING_VERB
+                    ):
+                        session.user_confirmed_coding = True
+
+            # Cancel previous task if still running.
+            # Do NOT touch session.cancelled here — if the new query reuses the
+            # same session (same conv_id), setting cancelled=True would make the
+            # freshly-created generator exit immediately without calling the LLM.
             if active_task and not active_task.done():
-                session.cancelled = True
                 active_task.cancel()
 
             gen = agent_loop.stream_run(
@@ -177,18 +274,15 @@ def _try_extract_memories(conv_id: str):
 
 @app.post("/api/settings")
 async def update_settings(settings: dict):
-    global MODEL
-    if "model" in settings and settings["model"]:
-        MODEL = settings["model"]
+    _apply_settings(settings)
+    _persist_settings(settings)
+    if settings.get("model"):
         print(f"[Agent] Model switched to: {MODEL}")
-    if "api_base" in settings and settings["api_base"]:
-        os.environ["OPENAI_API_BASE"] = settings["api_base"]
-        os.environ["LLM_API_BASE"] = settings["api_base"]
+    if settings.get("api_base"):
         print(f"[Agent] API base updated")
-    if "api_key" in settings and settings["api_key"]:
-        os.environ["OPENAI_API_KEY"] = settings["api_key"]
-        os.environ["DASHSCOPE_API_KEY"] = settings["api_key"]
+    if settings.get("api_key"):
         print(f"[Agent] API key updated")
+    print(f"[Agent] Settings persisted to {SETTINGS_FILE}")
     return {"status": "ok", "model": MODEL}
 
 
@@ -245,13 +339,6 @@ if __name__ == "__main__":
     if "--cli" in sys.argv:
         cli()
     else:
-        # Load MCP tools BEFORE starting uvicorn
-        _init_mcp_pool()
-        llm_tools = mcp_pool.get_tools_for_llm()
-        print(f"[Agent] {len(mcp_pool._tool_route)} total tools, {len(llm_tools)} exposed to LLM")
+        # lifespan hook handles _init_mcp_pool() + startup banner
         print(f"[Agent] Starting WebSocket server on port {AGENT_PORT}")
-        print(f"[Agent] Post service at {MCP_URL}")
-        if MEMPALACE_ENABLED:
-            print(f"[Agent] Mempalace enabled")
-        print(f"[Agent] LLM model: {MODEL}")
         uvicorn.run(app, host="0.0.0.0", port=AGENT_PORT)

@@ -205,13 +205,36 @@ export function useChatStore() {
     if (lastPart && lastPart.type === 'text') {
       lastPart.content += text
     } else {
-      msg.parts.push({ type: 'text', content: text })
+      // First chunk of a new text part (after a tool call): strip leading
+      // whitespace so the new text doesn't start with blank lines.
+      msg.parts.push({ type: 'text', content: text.replace(/^\s+/, '') })
     }
+    touchActive()
+  }
+
+  function addToolPendingPart(tool) {
+    const msg = getOrCreateStreamingMessage()
+    // Trim trailing whitespace on prior text part
+    const prev = msg.parts[msg.parts.length - 1]
+    if (prev && prev.type === 'text') {
+      prev.content = prev.content.replace(/\s+$/, '')
+    }
+    msg.parts.push({ type: 'tool_pending', tool })
     touchActive()
   }
 
   function addToolCallPart(tool, args) {
     const msg = getOrCreateStreamingMessage()
+    // Remove preceding tool_pending part (replaced by real tool card)
+    const lastIdx = msg.parts.length - 1
+    if (lastIdx >= 0 && msg.parts[lastIdx].type === 'tool_pending') {
+      msg.parts.splice(lastIdx, 1)
+    }
+    // Trim trailing whitespace on prior text part
+    const prev = msg.parts[msg.parts.length - 1]
+    if (prev && prev.type === 'text') {
+      prev.content = prev.content.replace(/\s+$/, '')
+    }
     const part = {
       type: 'tool',
       tool,
@@ -261,6 +284,25 @@ export function useChatStore() {
     if (!filePath && artifact.output_files && artifact.output_files.length > 0) {
       filePath = artifact.output_files[0]
     }
+    // Deduplicate: if same file_path already exists, replace it
+    if (filePath) {
+      const existingIdx = conv.artifacts.findIndex(a => a.file_path === filePath)
+      if (existingIdx >= 0) {
+        conv.artifacts[existingIdx] = {
+          ...conv.artifacts[existingIdx],
+          title: artifact.title || conv.artifacts[existingIdx].title,
+          summary: artifact.summary || conv.artifacts[existingIdx].summary,
+          data: artifact.data || conv.artifacts[existingIdx].data,
+          output_files: artifact.output_files || conv.artifacts[existingIdx].output_files,
+          created_at: new Date().toISOString(),
+        }
+        conv.activeArtifactIndex = existingIdx
+        state.artifactPanelOpen = true
+        touchActive()
+        scheduleSave()
+        return conv.artifacts[existingIdx]
+      }
+    }
     const a = {
       id: nextArtifactId++,
       title: artifact.title || 'Untitled',
@@ -274,7 +316,7 @@ export function useChatStore() {
     }
     conv.artifacts.push(a)
     conv.activeArtifactIndex = conv.artifacts.length - 1
-    state.artifactPanelOpen = true  // auto-open when new artifact arrives
+    state.artifactPanelOpen = true
     touchActive()
     scheduleSave()
     return a
@@ -389,6 +431,7 @@ export function useChatStore() {
     addMessage,
     getOrCreateStreamingMessage,
     appendToStreaming,
+    addToolPendingPart,
     addToolCallPart,
     finishToolCallPart,
     finalizeStreaming,

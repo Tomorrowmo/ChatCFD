@@ -1,41 +1,59 @@
-"""PostData: VTK data thin wrapper with zero-copy numpy access and physical quantity name mapping."""
+"""PostData: VTK data thin wrapper with zero-copy numpy access and
+physical quantity name mapping (SimGraph2 solver-aware mapping + legacy
+aliases for older CFD conventions)."""
 
-import json
 import os
 
 import numpy as np
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 
+from post_service.physical_mapping import get_mapping
 
-# Load physical mapping once at module level
-_CONFIG_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "config")
-).replace("\\", "/")
 
-_MAPPING_PATH = _CONFIG_DIR + "/physical_mapping.json"
+def _normalize(name: str) -> str:
+    """Case-insensitive, delimiter-insensitive key for alias matching.
+    Treats '_', '-', ' ' as equivalent and lowercases the result."""
+    return name.lower().replace("-", "_").replace(" ", "_").strip("_")
 
-with open(_MAPPING_PATH, "r", encoding="utf-8") as _f:
-    _PHYSICAL_MAPPING: dict = json.load(_f)
 
-# Build reverse alias lookup: raw_name -> standard_name
-_ALIAS_TO_STANDARD: dict[str, str] = {}
-for _std_name, _entry in _PHYSICAL_MAPPING.items():
-    for _alias in _entry["aliases"]:
-        _ALIAS_TO_STANDARD[_alias] = _std_name
+# Legacy aliases: raw names from older CFD conventions (pre-SIDS CGNS,
+# custom Tecplot headers) that SimGraph2's solver-aware mapping doesn't
+# cover. Kept as a fallback so existing files keep resolving even when
+# the solver_id is unknown.
+_LEGACY_ALIASES: dict[str, list[str]] = {
+    "pressure":             ["Static_Pressure", "p", "PRES"],
+    "pressure_coefficient": ["Pressure_Coefficient", "Cp", "CoefPressure", "C_P"],
+    "velocity_x":           ["X_Velocity", "Ux", "U_X"],
+    "velocity_y":           ["Y_Velocity", "Uy", "U_Y"],
+    "velocity_z":           ["Z_Velocity", "Uz", "U_Z"],
+    "temperature":          ["Static_Temperature", "T", "TEMP"],
+    "mach_number":          ["Mach_Number", "Ma"],
+    "density":              ["rho", "DENS"],
+    "coordinate_x":         ["x_coordinate", "X", "x"],
+    "coordinate_y":         ["y_coordinate", "Y", "y"],
+    "coordinate_z":         ["z_coordinate", "Z", "z"],
+}
+
+# Reverse lookup: normalized(raw_name) -> standard physical name.
+_LEGACY_REVERSE: dict[str, str] = {}
+for _std, _aliases in _LEGACY_ALIASES.items():
+    for _a in _aliases:
+        _LEGACY_REVERSE[_normalize(_a)] = _std
+    _LEGACY_REVERSE[_normalize(_std)] = _std
 
 
 class PostData:
-    """VTK data thin wrapper. Holds a reference to vtkMultiBlockDataSet (no copy).
-    Provides zero-copy numpy access with writeable=False protection and
-    physical quantity name resolution via mapping."""
+    """VTK data thin wrapper. Holds a reference to vtkMultiBlockDataSet
+    (no copy). Provides zero-copy numpy access with writeable=False
+    protection and solver-aware physical quantity name resolution."""
 
-    def __init__(self, multiblock: vtk.vtkMultiBlockDataSet, file_path: str):
+    def __init__(self, multiblock: vtk.vtkMultiBlockDataSet, file_path: str,
+                 solver_id: str | None = None):
         self._multiblock = multiblock
         self.file_path = os.path.normpath(file_path).replace("\\", "/")
-        self._mapping = _PHYSICAL_MAPPING
-        self._alias_to_standard = _ALIAS_TO_STANDARD
-        # Build zone index: name -> block index
+        self.solver_id = solver_id
+        self._mapping = get_mapping()
         self._zone_index: dict[str, int] = {}
         self._build_zone_index()
 
@@ -66,37 +84,123 @@ class PostData:
             )
         return self._multiblock.GetBlock(self._zone_index[zone])
 
+    def _raw_names_for_quantity(self, physical_name: str) -> list[str]:
+        """Gather raw names that map to a given physical quantity.
+
+        Preference: current solver first, then every other solver profile,
+        then legacy aliases. Callers iterate this list and match against
+        the block's actual array names.
+        """
+        seen: set[str] = set()
+        out: list[str] = []
+
+        def _add(name: str) -> None:
+            key = _normalize(name)
+            if key not in seen:
+                seen.add(key)
+                out.append(name)
+
+        profiles = self._mapping._solver_profiles
+        if self.solver_id and self.solver_id in profiles:
+            for e in profiles[self.solver_id].get("mappings", []):
+                if e.get("physical_name") == physical_name:
+                    _add(e["raw_name"])
+        for sid, prof in profiles.items():
+            if sid == self.solver_id:
+                continue
+            for e in prof.get("mappings", []):
+                if e.get("physical_name") == physical_name:
+                    _add(e["raw_name"])
+        for a in _LEGACY_ALIASES.get(physical_name, []):
+            _add(a)
+        return out
+
     def _resolve_name(self, zone: str, name: str, block: vtk.vtkDataSet) -> str:
         """Resolve a scalar name (standard or raw) to the actual array name in the block.
 
         Resolution order:
-        1. Direct match in point data or cell data
-        2. If name is a standard name, try each alias from mapping
-        3. Raise ValueError with available names
+        1. Direct match
+        2. Case/delimiter-insensitive match against block arrays
+        3. If *name* is a physical quantity, try raw-name candidates from
+           mapping (current solver first) and legacy aliases
+        4. Raise ValueError with available names
         """
         point_data = block.GetPointData()
         cell_data = block.GetCellData()
 
-        # 1. Direct match
+        # 1. Direct match (fast path)
         if point_data.GetArray(name) is not None or cell_data.GetArray(name) is not None:
             return name
 
-        # 2. Standard name -> try aliases
-        if name in self._mapping:
-            for alias in self._mapping[name]["aliases"]:
-                if point_data.GetArray(alias) is not None or cell_data.GetArray(alias) is not None:
-                    return alias
-
-        # 3. Not found
         available = self.get_scalar_names(zone)
+        target = _normalize(name)
+
+        # 2. Normalized match against actual array names
+        for arr_name in available:
+            if _normalize(arr_name) == target:
+                return arr_name
+
+        # 3. Standard quantity name -> raw name candidates
+        is_standard = (
+            self._mapping.get_standard_info(name) is not None
+            or name in _LEGACY_ALIASES
+        )
+        if is_standard:
+            for cand in self._raw_names_for_quantity(name):
+                cand_key = _normalize(cand)
+                for arr_name in available:
+                    if _normalize(arr_name) == cand_key:
+                        return arr_name
+
+        # 4. Not found
         raise ValueError(
             f"Scalar '{name}' not found in zone '{zone}'. "
             f"Available scalars: {available}"
         )
 
     def _find_standard_name(self, raw_name: str) -> str | None:
-        """Reverse lookup: raw array name -> standard name, or None if not mapped."""
-        return self._alias_to_standard.get(raw_name)
+        """Reverse lookup: raw array name -> standard physical name, or None."""
+        # Solver-aware (authoritative when solver_id known)
+        entry = self._mapping.resolve(raw_name, solver_id=self.solver_id)
+        if entry and not entry.get("ambiguous"):
+            phys = entry.get("physical_name")
+            if phys:
+                return phys
+
+        # Case/delimiter-insensitive scan across all solver profiles
+        target = _normalize(raw_name)
+        for prof in self._mapping._solver_profiles.values():
+            for e in prof.get("mappings", []):
+                if _normalize(e["raw_name"]) == target:
+                    phys = e.get("physical_name")
+                    if phys:
+                        return phys
+
+        # Legacy fallback (covers Static_Pressure / X_Velocity etc.)
+        return _LEGACY_REVERSE.get(target)
+
+    def _find_scalar_meta(self, raw_name: str) -> dict:
+        """Metadata for a raw scalar: standard_name, display_name, unit,
+        plus solver-specific confidence/conversion/ambiguity_risk when
+        available."""
+        std = self._find_standard_name(raw_name)
+        meta: dict = {}
+        if std is None:
+            return meta
+        meta["standard_name"] = std
+        info = self._mapping.get_standard_info(std)
+        if info:
+            if info.get("display_name"):
+                meta["display_name"] = info["display_name"]
+            if info.get("unit") is not None:
+                meta["unit"] = info["unit"]
+        entry = self._mapping.resolve(raw_name, solver_id=self.solver_id)
+        if entry and not entry.get("ambiguous"):
+            for key in ("confidence", "conversion", "ambiguity_risk"):
+                val = entry.get(key)
+                if val:
+                    meta[key] = val
+        return meta
 
     # ------------------------------------------------------------------
     # Public API
@@ -109,13 +213,13 @@ class PostData:
     def get_scalar(self, zone: str, name: str) -> np.ndarray:
         """Zero-copy numpy array for a scalar in the given zone.
 
-        Supports both raw names ('Static_Pressure') and standard names ('pressure').
-        Returned array has writeable=False to protect VTK memory.
+        Supports both raw names ('Static_Pressure') and standard names
+        ('pressure'). Returned array has writeable=False to protect VTK
+        memory.
         """
         block = self._get_block(zone)
         resolved = self._resolve_name(zone, name, block)
 
-        # Try point data first, then cell data
         arr = block.GetPointData().GetArray(resolved)
         if arr is None:
             arr = block.GetCellData().GetArray(resolved)
@@ -166,6 +270,27 @@ class PostData:
             "zmax": bounds[5],
         }
 
+    _VTK_CELL_TYPE_NAMES = {
+        3: "line", 5: "triangle", 9: "quad",
+        10: "tetra", 12: "hex", 13: "wedge", 14: "pyramid",
+        21: "tri6", 22: "tri6", 24: "quad_quadratic",
+        25: "hex20", 42: "polyhedron",
+    }
+
+    def _get_cell_type_summary(self, block) -> list[dict]:
+        """Return [{type: "tetra", count: 12345}, ...] for a VTK block."""
+        if not hasattr(block, "GetCellTypesArray"):
+            return []
+        arr = block.GetCellTypesArray()
+        if arr is None or arr.GetNumberOfTuples() == 0:
+            return []
+        types = vtk_to_numpy(arr)
+        unique, counts = np.unique(types, return_counts=True)
+        return [
+            {"type": self._VTK_CELL_TYPE_NAMES.get(int(t), f"vtk_type_{t}"), "count": int(c)}
+            for t, c in zip(unique, counts)
+        ]
+
     def get_summary(self) -> dict:
         """Summary dict with zones, scalars (with mapping info), and mesh counts."""
         zones_info = []
@@ -182,23 +307,22 @@ class PostData:
             scalars = []
             for raw_name in self.get_scalar_names(zone_name):
                 entry = {"raw_name": raw_name}
-                std = self._find_standard_name(raw_name)
-                if std is not None:
-                    m = self._mapping[std]
-                    entry["standard_name"] = std
-                    entry["display_name"] = m["display_name"]
-                    entry["unit"] = m["unit"]
+                entry.update(self._find_scalar_meta(raw_name))
                 scalars.append(entry)
+
+            cell_types = self._get_cell_type_summary(block)
 
             zones_info.append({
                 "name": zone_name,
                 "point_count": n_points,
                 "cell_count": n_cells,
+                "cell_types": cell_types,
                 "scalars": scalars,
             })
 
         return {
             "file_path": self.file_path,
+            "solver_id": self.solver_id,
             "total_points": total_points,
             "total_cells": total_cells,
             "zone_count": len(zones_info),

@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:8000'
+import { POST_SERVICE_URL as BASE_URL } from '../config.js'
 
 export function useApi() {
   async function getMesh(sessionId, zone, file = '') {

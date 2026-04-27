@@ -7,10 +7,22 @@ const SETTINGS_KEY = 'chatcfd.settings.v1'
 const AGENT_URL = 'http://localhost:8080'
 
 const MODELS = [
+  'openai/gpt-4o-mini',
+  'openai/gpt-4o',
   'openai/qwen3-max',
   'openai/qwen-plus',
   'openai/qwen-max',
   'openai/qwen-turbo',
+  'openai/claude-3-5-sonnet-20241022',
+  'openai/claude-3-7-sonnet-20250219',
+  'openai/claude-3-5-haiku-20241022',
+]
+
+const API_BASES = [
+  'https://fast.poloai.top/v1',
+  'https://poloai.top/v1',
+  'https://polocdn.580ai.net/v1',
+  'https://dashscope.aliyuncs.com/compatible-mode/v1',
 ]
 
 const model = ref('openai/qwen3-max')
@@ -88,7 +100,10 @@ function onBackdropClick(e) {
         </div>
         <div class="form-row">
           <label>API Base URL</label>
-          <input type="text" v-model="apiBase" placeholder="留空使用默认" />
+          <input type="text" v-model="apiBase" list="api-base-list" placeholder="留空使用默认" />
+          <datalist id="api-base-list">
+            <option v-for="u in API_BASES" :key="u" :value="u" />
+          </datalist>
         </div>
         <div v-if="statusMsg" class="status">{{ statusMsg }}</div>
       </div>

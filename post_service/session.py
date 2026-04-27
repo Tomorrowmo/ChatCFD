@@ -10,11 +10,13 @@ from post_service.post_data import PostData
 class FrameSequence:
     """Lazy-loading multi-frame container. Holds reader reference, loads frames on demand."""
 
-    def __init__(self, reader, file_path: str, frame_count: int, time_labels: list[str], max_cache: int = 50):
+    def __init__(self, reader, file_path: str, frame_count: int, time_labels: list[str],
+                 max_cache: int = 50, solver_id: str | None = None):
         self.reader = reader  # vtk.vtkRomtekIODriver, kept alive
         self.file_path = file_path
         self.frame_count = frame_count
         self.time_labels = time_labels
+        self.solver_id = solver_id
         self._lock = threading.Lock()
         self._cache: dict[int, PostData] = {}
         self._cache_order: list[int] = []
@@ -38,7 +40,7 @@ class FrameSequence:
             mb = self.reader.getOutPut()
             mb_copy = vtk.vtkMultiBlockDataSet()
             mb_copy.DeepCopy(mb)
-            pd = PostData(mb_copy, self.file_path)
+            pd = PostData(mb_copy, self.file_path, solver_id=self.solver_id)
 
             if len(self._cache) >= self._max_cache:
                 oldest = self._cache_order.pop(0)
@@ -92,7 +94,7 @@ class FrameSequence:
                 if i not in self._cache and len(self._cache) < self._max_cache:
                     mb_copy = vtk.vtkMultiBlockDataSet()
                     mb_copy.DeepCopy(mb)
-                    self._cache[i] = PostData(mb_copy, self.file_path)
+                    self._cache[i] = PostData(mb_copy, self.file_path, solver_id=self.solver_id)
                     self._cache_order.append(i)
 
                 # Extract ranges (fast — just reads array min/max)
@@ -160,13 +162,15 @@ class MultiFileFrameSequence:
     """
 
     def __init__(self, file_paths: list[str], reader_names: list[str],
-                 virtual_path: str, max_cache: int = 50):
+                 virtual_path: str, max_cache: int = 50,
+                 solver_id: str | None = None):
         self.file_paths = file_paths          # one path per frame
         self.reader_names = reader_names      # reader name per frame
         self.file_path = virtual_path         # directory path, used as session key
         self.frame_count = len(file_paths)
         self.time_labels = [os.path.splitext(os.path.basename(fp))[0] for fp in file_paths]
         self.reader = None                    # no single reader
+        self.solver_id = solver_id
         self._lock = threading.Lock()
         self._cache: dict[int, PostData] = {}
         self._cache_order: list[int] = []
@@ -201,7 +205,7 @@ class MultiFileFrameSequence:
         mb = self._read_file(index)
         if mb is None:
             raise RuntimeError(f"Failed to read frame {index}: {self.file_paths[index]}")
-        pd = PostData(mb, self.file_path)
+        pd = PostData(mb, self.file_path, solver_id=self.solver_id)
 
         with self._lock:
             if index in self._cache:
@@ -244,7 +248,7 @@ class MultiFileFrameSequence:
 
             with self._lock:
                 if i not in self._cache and len(self._cache) < self._max_cache:
-                    pd = PostData(mb, self.file_path)
+                    pd = PostData(mb, self.file_path, solver_id=self.solver_id)
                     self._cache[i] = pd
                     self._cache_order.append(i)
 

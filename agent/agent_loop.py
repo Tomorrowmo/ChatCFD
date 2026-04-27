@@ -1,6 +1,7 @@
 """AgentLoop — LLM -> tool_call -> Harness -> MCP dispatch -> repeat."""
 
 import json
+import time
 
 import litellm
 
@@ -149,6 +150,25 @@ def _auto_invalidate_old_preference(mcp_pool: MCPClientPool,
         pass  # best-effort: if old fact doesn't exist, invalidate is a no-op
 
 
+def _tool_call_signature(name: str, args: dict) -> str:
+    """Stable signature for a tool call, ignoring injected `session_id`.
+
+    Two calls that differ only in session_id are considered identical for
+    the purpose of duplicate-call detection.
+    """
+    payload = {k: v for k, v in args.items() if k != "session_id"}
+    return name + "::" + json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+
+_DUPLICATE_CALL_HINT = (
+    "Duplicate call rejected: the previous call to this tool with identical "
+    "arguments just ran — its result is above in the scrollback. Either accept "
+    "that result, or change parameters meaningfully. If the tool cannot do "
+    "what you intend, call getMethodTemplate(method='{name}') to inspect its "
+    "real parameters instead of guessing."
+)
+
+
 def _auto_dedup_drawer(mcp_pool: MCPClientPool, content: str) -> bool:
     """Check duplicate before add_drawer. Returns True if duplicate found."""
     if not mcp_pool.has_tool("mempalace_check_duplicate"):
@@ -176,8 +196,11 @@ def run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
         _inject_global_preferences(session, mcp_pool)
 
     system_msg = {"role": "system", "content": build_system_prompt()}
-    tools = mcp_pool.get_tools_for_llm()
+    tools = mcp_pool.get_tools_for_llm(
+        include_coding=session.user_confirmed_coding,
+    )
     artifacts = []
+    last_tool_sig: str | None = None  # harness-level duplicate-call guard
 
     for _ in range(max_rounds):
         try:
@@ -232,6 +255,20 @@ def run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
                     mcp_pool, args.get("subject", ""), args.get("predicate", ""),
                 )
 
+            # Duplicate-call guard (harness level, independent of prompt):
+            # reject back-to-back identical tool invocations so a confused LLM
+            # cannot burn resources repeating the same call 10 times.
+            sig = _tool_call_signature(name, args)
+            if sig == last_tool_sig:
+                result = json.dumps(
+                    {"error": _DUPLICATE_CALL_HINT.format(name=name)},
+                    ensure_ascii=False,
+                )
+                session.messages.append({
+                    "role": "tool", "tool_call_id": tc.id, "content": result,
+                })
+                continue
+
             # Harness before-check
             blocked = harness.before_call(
                 name, args,
@@ -242,32 +279,33 @@ def run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
             elif mcp_pool.has_tool(name):
                 raw = mcp_pool.call_tool(name, args)
                 try:
-                    parsed = json.loads(raw)
-                    parsed = harness.after_call(name, parsed)
-                    result = json.dumps(parsed, ensure_ascii=False)
-                    # Collect artifacts from tool results
-                    if isinstance(parsed, dict) and "error" not in parsed:
+                    full = json.loads(raw)
+                    # Artifact uses the full parsed result (frontend can handle it).
+                    # LLM only sees after_call (may truncate oversized `data`).
+                    truncated = harness.after_call(name, full)
+                    result = json.dumps(truncated, ensure_ascii=False)
+                    if isinstance(full, dict) and "error" not in full:
                         if name == "loadFile":
-                            source_file = parsed.get("file_path", "")
+                            source_file = full.get("file_path", "")
                             session.loaded_file_path = source_file
                             artifacts.append({
                                 "title": f"loadFile: {source_file.split('/')[-1]}",
                                 "type": "numerical",
-                                "summary": f"{parsed.get('zone_count', 0)} zones, {parsed.get('total_cells', 0)} cells, {parsed.get('total_points', 0)} points",
-                                "data": parsed,
+                                "summary": f"{full.get('zone_count', 0)} zones, {full.get('total_cells', 0)} cells, {full.get('total_points', 0)} points",
+                                "data": full,
                                 "output_files": [],
                                 "source_file": source_file,
                             })
                             # Memory: inject related memories after loadFile
                             if source_file:
                                 _inject_memory_after_load(session, mcp_pool, source_file)
-                        elif "summary" in parsed:
+                        elif "summary" in full:
                             artifacts.append({
-                                "title": _make_artifact_title(name, args, parsed),
-                                "type": parsed.get("type", "numerical"),
-                                "summary": parsed.get("summary", ""),
-                                "data": parsed.get("data"),
-                                "output_files": parsed.get("output_files", []),
+                                "title": _make_artifact_title(name, args, full),
+                                "type": full.get("type", "numerical"),
+                                "summary": full.get("summary", ""),
+                                "data": full.get("data"),
+                                "output_files": full.get("output_files", []),
                                 "source_file": getattr(session, 'loaded_file_path', ''),
                             })
                 except json.JSONDecodeError:
@@ -275,6 +313,10 @@ def run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
             else:
                 result = json.dumps({"error": f"Unknown tool: {name}"})
 
+            # Only record signature for *actually executed* calls. Blocked
+            # or unknown-tool responses stay off the record so a retry after
+            # correction isn't itself flagged as a duplicate.
+            last_tool_sig = sig
             session.messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
@@ -300,11 +342,15 @@ def stream_run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
         _inject_global_preferences(session, mcp_pool)
 
     system_msg = {"role": "system", "content": build_system_prompt()}
-    tools = mcp_pool.get_tools_for_llm()
+    tools = mcp_pool.get_tools_for_llm(
+        include_coding=session.user_confirmed_coding,
+    )
     artifacts = []
+    last_tool_sig: str | None = None  # harness-level duplicate-call guard
 
-    for _ in range(max_rounds):
+    for round_i in range(max_rounds):
         # Streaming LLM call
+        t_llm_start = time.perf_counter()
         try:
             response = litellm.completion(
                 model=model,
@@ -340,6 +386,10 @@ def stream_run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
                 for tc_delta in delta.tool_calls:
                     idx = tc_delta.index
                     if idx not in tool_calls_acc:
+                        # First chunk of a new tool call — notify frontend immediately
+                        tool_name_hint = (tc_delta.function.name or "") if tc_delta.function else ""
+                        if tool_name_hint:
+                            yield {"type": "tool_pending", "tool": tool_name_hint}
                         tool_calls_acc[idx] = {
                             "id": tc_delta.id or "",
                             "name": tc_delta.function.name if tc_delta.function and tc_delta.function.name else "",
@@ -353,6 +403,9 @@ def stream_run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
                                 tool_calls_acc[idx]["name"] += tc_delta.function.name
                             if tc_delta.function.arguments:
                                 tool_calls_acc[idx]["arguments"] += tc_delta.function.arguments
+
+        t_llm_end = time.perf_counter()
+        print(f"[Timing] LLM round {round_i} stream: {t_llm_end - t_llm_start:.2f}s")
 
         # Build assistant message for history
         assistant_msg = {"role": "assistant", "content": full_content or None}
@@ -405,8 +458,25 @@ def stream_run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
                     mcp_pool, args.get("subject", ""), args.get("predicate", ""),
                 )
 
+            # Duplicate-call guard (harness level, independent of prompt):
+            # reject back-to-back identical tool invocations so a confused LLM
+            # cannot burn resources repeating the same call 10 times.
+            sig = _tool_call_signature(name, args)
+            if sig == last_tool_sig:
+                result = json.dumps(
+                    {"error": _DUPLICATE_CALL_HINT.format(name=name)},
+                    ensure_ascii=False,
+                )
+                session.messages.append({
+                    "role": "tool", "tool_call_id": tc["id"], "content": result,
+                })
+                yield {"type": "tool_result", "tool": name,
+                       "summary": "duplicate call rejected"}
+                continue
+
             yield {"type": "tool_start", "tool": name, "args": args}
 
+            t0 = time.perf_counter()
             blocked = harness.before_call(
                 name, args,
                 user_confirmed_coding=session.user_confirmed_coding,
@@ -414,47 +484,82 @@ def stream_run(session: AgentSession, mcp_pool: MCPClientPool, harness: Harness,
             if blocked:
                 result = json.dumps(blocked, ensure_ascii=False)
             elif mcp_pool.has_tool(name):
+                t1 = time.perf_counter()
                 raw = mcp_pool.call_tool(name, args)
+                t2 = time.perf_counter()
+                print(f"[Timing] mcp_pool.call_tool({name}): {t2 - t1:.2f}s")
                 try:
-                    parsed = json.loads(raw)
-                    parsed = harness.after_call(name, parsed)
-                    result = json.dumps(parsed, ensure_ascii=False)
-                    if isinstance(parsed, dict) and "error" not in parsed:
+                    full = json.loads(raw)
+                    truncated = harness.after_call(name, full)
+                    result = json.dumps(truncated, ensure_ascii=False)
+                    if isinstance(full, dict) and "error" not in full:
                         if name == "loadFile":
-                            source_file = parsed.get("file_path", "")
+                            source_file = full.get("file_path", "")
                             session.loaded_file_path = source_file
                             artifact = {
                                 "title": f"loadFile: {source_file.split('/')[-1]}",
                                 "type": "numerical",
-                                "summary": f"{parsed.get('zone_count', 0)} zones, {parsed.get('total_cells', 0)} cells, {parsed.get('total_points', 0)} points",
-                                "data": parsed,
+                                "summary": f"{full.get('zone_count', 0)} zones, {full.get('total_cells', 0)} cells, {full.get('total_points', 0)} points",
+                                "data": full,
                                 "output_files": [],
                                 "source_file": source_file,
                             }
                             artifacts.append(artifact)
-                            if source_file:
-                                _inject_memory_after_load(session, mcp_pool, source_file)
-                        elif "summary" in parsed:
+                            # Memory injection disabled at loadFile time to avoid
+                            # 3-10s subprocess overhead. LLM can still call
+                            # mempalace_search manually when user asks.
+                        elif name in ("runBash", "runPython") and full.get("output_files"):
+                            for fpath in full["output_files"]:
+                                fpath = fpath.replace("\\", "/")
+                                fname = fpath.split("/")[-1]
+                                artifacts.append({
+                                    "title": f"Code Output: {fname}",
+                                    "type": "image" if fname.lower().endswith((".png", ".jpg", ".gif")) else "file",
+                                    "summary": full.get("stdout", "")[:200],
+                                    "data": {"output_file": fpath},
+                                    "output_files": [fpath],
+                                    "source_file": getattr(session, 'loaded_file_path', ''),
+                                })
+                        elif "summary" in full:
                             artifact = {
-                                "title": _make_artifact_title(name, args, parsed),
-                                "type": parsed.get("type", "numerical"),
-                                "summary": parsed.get("summary", ""),
-                                "data": parsed.get("data"),
-                                "output_files": parsed.get("output_files", []),
+                                "title": _make_artifact_title(name, args, full),
+                                "type": full.get("type", "numerical"),
+                                "summary": full.get("summary", ""),
+                                "data": full.get("data"),
+                                "output_files": full.get("output_files", []),
                                 "source_file": getattr(session, 'loaded_file_path', ''),
                             }
                             artifacts.append(artifact)
+                            # Auto-create image artifact for GIF output
+                            gif_file = (full.get("data") or {}).get("gif_file")
+                            if gif_file:
+                                gif_file = gif_file.replace("\\", "/")
+                                artifacts.append({
+                                    "title": "GIF: " + gif_file.split("/")[-1],
+                                    "type": "image",
+                                    "summary": full.get("summary", ""),
+                                    "data": {"output_file": gif_file},
+                                    "output_files": [gif_file],
+                                    "source_file": getattr(session, 'loaded_file_path', ''),
+                                })
                 except json.JSONDecodeError:
                     result = raw
+                    full = None
             else:
                 result = json.dumps({"error": f"Unknown tool: {name}"})
+                full = None
 
+            # Record signature only for executed calls — blocked or unknown
+            # responses stay off the record so a retry after correction
+            # is not itself flagged as a duplicate.
+            last_tool_sig = sig
             session.messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
                 "content": result,
             })
 
-            yield {"type": "tool_result", "tool": name, "summary": parsed.get("summary", "") if "parsed" in dir() else ""}
+            yield {"type": "tool_result", "tool": name,
+                   "summary": full.get("summary", "") if isinstance(full, dict) else ""}
 
     yield {"type": "done", "content": "Maximum rounds reached.", "artifacts": artifacts}

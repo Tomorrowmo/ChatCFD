@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, computed, onMounted } from 'vue'
+import { POST_SERVICE_URL } from '../config.js'
 import VtkViewer from './VtkViewer.vue'
 import TimeControls from './TimeControls.vue'
 import { useChatStore } from '../stores/chat.js'
@@ -80,7 +81,7 @@ const fileParam = computed(() => props.sourceFile ? `?file=${encodeURIComponent(
 async function refreshZones() {
   try {
     loading.value = true
-    const resp = await fetch(`http://localhost:8000/api/zones/${sessionId.value}${fileParam.value}`)
+    const resp = await fetch(`${POST_SERVICE_URL}/api/zones/${sessionId.value}${fileParam.value}`)
     if (resp.ok) {
       const data = await resp.json()
       if (data.zones) {
@@ -134,7 +135,7 @@ async function updateMaxCache(val) {
   const params = new URLSearchParams({ max_cache: String(val) })
   if (props.sourceFile) params.set('file', props.sourceFile)
   try {
-    await fetch(`http://localhost:8000/api/frame_cache/${sessionId.value}?${params}`, { method: 'PUT' })
+    await fetch(`${POST_SERVICE_URL}/api/frame_cache/${sessionId.value}?${params}`, { method: 'PUT' })
   } catch (e) {
     console.warn('[MeshBrowser] Failed to set frame cache:', e.message)
   }

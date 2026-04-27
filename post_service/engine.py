@@ -36,6 +36,22 @@ class PostEngine:
         "controlDict": "OpenFoamReader",
     }
 
+    # Reader name → SimGraph2 solver_id. Drives physical-quantity mapping
+    # in PostData. VTK/Ensight readers have no canonical source solver, so
+    # they fall back to None (legacy alias layer still catches common names).
+    _READER_SOLVER_MAP = {
+        "CGNSReader":       "cgns",
+        "TecplotReader":    "tecplot",
+        "VTKD3PlotReader":  "lsdyna",
+        "OpenFoamReader":   "openfoam_incompressible",
+    }
+
+    def _reader_to_solver_id(self, reader_name: str) -> str | None:
+        """Map RomtekIODriver reader name to SimGraph2 solver_id.
+        OpenFOAM defaults to incompressible (most common); compressible
+        files need explicit override from the user."""
+        return self._READER_SOLVER_MAP.get(reader_name)
+
     def _is_supported_file(self, file_path: str) -> bool:
         """Check if a file is a supported CFD format."""
         basename = os.path.basename(file_path)
@@ -77,8 +93,14 @@ class PostEngine:
             supported = list(self._READER_MAP.keys()) + list(self._FILENAME_READER_MAP.keys())
             return {"error": f"No supported files in '{dir_path}'. Supported formats: {supported}"}
 
-        # Build multi-file frame sequence (each file = one frame)
-        sequence = MultiFileFrameSequence(targets, reader_names, dir_path)
+        # All files share the same solver when they share the reader, which
+        # is the common case (a directory of .cgns / .plt / .vtu). When they
+        # differ (rare), fall back to the first file's solver — PostData's
+        # legacy alias layer catches the others.
+        solver_id = self._reader_to_solver_id(reader_names[0])
+        sequence = MultiFileFrameSequence(
+            targets, reader_names, dir_path, solver_id=solver_id,
+        )
 
         # Load frame 0 for immediate use
         try:
@@ -161,7 +183,10 @@ class PostEngine:
             pass  # reader doesn't support getTimeCount — single frame
 
         # Create FrameSequence (lazy — reader kept alive, frames loaded on demand)
-        sequence = FrameSequence(reader, file_path, time_count, time_labels)
+        solver_id = self._reader_to_solver_id(reader_name)
+        sequence = FrameSequence(
+            reader, file_path, time_count, time_labels, solver_id=solver_id,
+        )
 
         # Load frame 0 for immediate use
         frame0 = sequence.get_frame(0)
@@ -236,7 +261,6 @@ class PostEngine:
         if state is None or state.post_data is None:
             return {"error": "No file loaded."}
 
-        # Phase 1: same-file zone comparison. Parse "zone:scalar" format.
         if ":" not in source_a or ":" not in source_b:
             return {"error": "source_a and source_b must use 'zone:scalar' format (e.g. 'wall:Pressure')."}
 
@@ -244,7 +268,15 @@ class PostEngine:
         zone_b, scalar_b = source_b.split(":", 1)
 
         if scalar_a != scalar_b:
-            return {"error": f"Scalar mismatch: '{scalar_a}' vs '{scalar_b}'. Phase 1 only supports comparing the same scalar across zones."}
+            return {"error": f"Scalar mismatch: '{scalar_a}' vs '{scalar_b}'."}
+
+        # Cross-file: get post_data for file_b
+        file_b = kwargs.get("file_b", "")
+        pd_b = None
+        if file_b:
+            pd_b = state.get_post_data(file_b)
+            if pd_b is None:
+                return {"error": f"File '{file_b}' not loaded. Call loadFile first."}
 
         entry = self.registry.get("compare")
         if entry is None:
@@ -252,6 +284,8 @@ class PostEngine:
 
         params = {**entry["defaults"], "scalar": scalar_a, "zone_a": zone_a, "zone_b": zone_b}
         try:
+            if pd_b:
+                return entry["execute"](state.post_data, params, "", post_data_b=pd_b)
             return entry["execute"](state.post_data, params, "")
         except Exception as e:
             return {"error": f"Compare failed: {e}"}
@@ -286,18 +320,36 @@ class PostEngine:
             }
         return {"error": f"Unsupported format: {format}"}
 
-    def list_files(self, directory: str, suffix: str = None) -> dict:
+    def list_files(self, directory: str, suffix: str = None,
+                   keyword: str = None, recursive: bool = False) -> dict:
         directory = os.path.normpath(directory).replace("\\", "/")
         if not os.path.isdir(directory):
             return {"error": f"Directory not found: {directory}"}
         files = []
-        for f in sorted(os.listdir(directory)):
-            full = os.path.join(directory, f)
-            if not os.path.isfile(full):
-                continue
-            if suffix and not f.endswith(suffix):
-                continue
-            files.append(os.path.normpath(full).replace("\\", "/"))
+        if recursive:
+            max_results = 200
+            for root, _dirs, fnames in os.walk(directory):
+                for f in sorted(fnames):
+                    if suffix and not f.endswith(suffix):
+                        continue
+                    if keyword and keyword.lower() not in f.lower():
+                        continue
+                    full = os.path.normpath(os.path.join(root, f)).replace("\\", "/")
+                    files.append(full)
+                    if len(files) >= max_results:
+                        break
+                if len(files) >= max_results:
+                    break
+        else:
+            for f in sorted(os.listdir(directory)):
+                full = os.path.join(directory, f)
+                if not os.path.isfile(full):
+                    continue
+                if suffix and not f.endswith(suffix):
+                    continue
+                if keyword and keyword.lower() not in f.lower():
+                    continue
+                files.append(os.path.normpath(full).replace("\\", "/"))
         return {"files": files, "count": len(files), "directory": directory}
 
     def get_method_template(self, method: str = None) -> dict:

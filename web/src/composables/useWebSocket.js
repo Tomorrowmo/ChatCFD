@@ -116,6 +116,7 @@ function createRealWebSocket() {
   const {
     addArtifact,
     appendToStreaming,
+    addToolPendingPart,
     addToolCallPart,
     finishToolCallPart,
     finalizeStreaming,
@@ -143,6 +144,9 @@ function createRealWebSocket() {
 
         if (data.type === 'token') {
           appendToStreaming(data.content)
+        } else if (data.type === 'tool_pending') {
+          // LLM is generating tool call arguments — show early indicator
+          addToolPendingPart(data.tool)
         } else if (data.type === 'tool_start') {
           // Create structured tool part with live spinner
           addToolCallPart(data.tool, data.args || {})

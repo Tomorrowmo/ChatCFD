@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
+import { POST_SERVICE_URL } from '../config.js'
 import TimeControls from './TimeControls.vue'
 
 import '@kitware/vtk.js/Rendering/Profiles/Geometry'
@@ -145,7 +146,7 @@ async function precomputeGlobalRanges() {
   for (const filePath of props.frameFiles) {
     try {
       const safePath = filePath.split('/').map(s => encodeURIComponent(s)).join('/')
-      const resp = await fetch(`http://localhost:8000/api/file/${safePath}`)
+      const resp = await fetch(`${POST_SERVICE_URL}/api/file/${safePath}`)
       if (!resp.ok) continue
       const buffer = await resp.arrayBuffer()
       const reader = vtkXMLPolyDataReader.newInstance()
@@ -218,7 +219,7 @@ async function loadBaseModel() {
   if (!props.sessionId || !props.baseZone) return
   try {
     const fileParam = props.sourceFile ? `?file=${encodeURIComponent(props.sourceFile)}` : ''
-    const url = `http://localhost:8000/api/surface/${props.sessionId}/${encodeURIComponent(props.baseZone)}${fileParam}`
+    const url = `${POST_SERVICE_URL}/api/surface/${props.sessionId}/${encodeURIComponent(props.baseZone)}${fileParam}`
     const resp = await fetch(url)
     if (!resp.ok) return
     const buffer = await resp.arrayBuffer()
@@ -237,7 +238,7 @@ async function loadVtp() {
   try {
     // Load base model and result in parallel
     const safePath = activePath.value.split('/').map(s => encodeURIComponent(s)).join('/')
-    const url = `http://localhost:8000/api/file/${safePath}`
+    const url = `${POST_SERVICE_URL}/api/file/${safePath}`
 
     const [resp] = await Promise.all([
       fetch(url),

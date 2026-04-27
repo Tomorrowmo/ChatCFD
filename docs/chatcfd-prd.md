@@ -1230,42 +1230,218 @@ return {"error": "file not found"}
 
 ### 12.1 需求
 
-当用户的需求超出现有工具能力时，AI 可以编写并执行自定义脚本。但必须**先征得用户同意**，防止 AI 自作主张。
+当用户的需求超出现有 6 个 MCP 工具能力时（如合成 GIF、自定义绘图、复杂数据分析），AI 需要编写并执行自定义代码。不同于简单的 `runBash` 工具暴露，ChatCFD 采用 **Coding Agent** 模式——AI 能迭代式编写、执行、调试代码，而不是一次性写对。
 
-### 12.2 实现
+### 12.2 双层执行架构
 
-在 Harness 层拦截 `run_bash` / `runPythonString` 的调用：
+Coding Agent 拥有两种执行模式，根据任务需求自动选择：架构核心思路：简单任务走子进程（安全），需要内存数据走进程内（强大），Coding 子 Agent 能迭代调试（不是一次性工具）。
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Agent 服务层                                                    │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  主 Agent（agent_loop.py）                                │   │
+│  │  判断 → 需要写代码 → 先问用户确认                          │   │
+│  │  确认后 → 创建 Coding 子 Agent                            │   │
+│  └────────────────────┬─────────────────────────────────────┘   │
+│                       │                                          │
+│  ┌────────────────────▼─────────────────────────────────────┐   │
+│  │  Coding 子 Agent（sub_agent.py）                          │   │
+│  │  干净上下文 │ 独立 LLM 调用 │ 可迭代（写→跑→改→重跑）      │   │
+│  │                                                           │   │
+│  │  ┌─────────────────────┐  ┌───────────────────────────┐  │   │
+│  │  │  Mode A: 子进程执行   │  │  Mode B: 进程内执行        │  │   │
+│  │  │  runBash / runPython │  │  runEngineCode             │  │   │
+│  │  │                     │  │                             │  │   │
+│  │  │  独立 subprocess    │  │  在 PostService 进程内执行   │  │   │
+│  │  │  只能读写磁盘文件    │  │  可访问内存中的 VTK/numpy   │  │   │
+│  │  │  安全隔离            │  │  能力更强，风险更高          │  │   │
+│  │  │                     │  │                             │  │   │
+│  │  │  适用:              │  │  适用:                       │  │   │
+│  │  │  · ffmpeg 合 GIF    │  │  · post_data.get_scalar()  │  │   │
+│  │  │  · matplotlib 画图  │  │  · VTK filter 自定义管线    │  │   │
+│  │  │  · 文件格式转换      │  │  · numpy 自定义计算         │  │   │
+│  │  │  · 数据文件处理      │  │  · 超出算法注册表的分析      │  │   │
+│  │  └─────────────────────┘  └───────────────────────────┘  │   │
+│  │                                                           │   │
+│  │  两种模式共享:                                             │   │
+│  │  · Harness 安全约束（用户确认 + 危险命令拦截 + 超时）       │   │
+│  │  · 输出截断（子 Agent 只返回摘要给主 Agent）               │   │
+│  │  · 文件产物推送（png/gif/csv → Artifact 侧边栏）          │   │
+│  └───────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 12.3 三个 MCP 工具
+
+在 `post_service/mcp_tools/` 注册，通过 MCP SSE 暴露给 Agent：
+
+| 工具 | 执行模式 | 输入 | 输出 | 用途 |
+|------|---------|------|------|------|
+| `runBash` | Mode A: 子进程 | `command: str` | `{stdout, stderr, exit_code}` | Shell 命令（ffmpeg、文件操作） |
+| `runPython` | Mode A: 子进程 | `code: str` | `{stdout, stderr, output_files}` | 独立 Python 脚本（matplotlib、数据处理） |
+| `runEngineCode` | Mode B: 进程内 | `code: str, session_id: str` | `{stdout, result, output_files}` | 访问 PostEngine 内存数据的 Python 代码 |
+
+#### Mode A: 子进程执行（runBash / runPython）
 
 ```python
-# Harness 层
-def before_tool_call(tool_name, args):
-    if tool_name in ("run_bash", "runPythonString"):
-        # 要求 AI 必须先获得用户确认
-        if not session.user_confirmed_coding:
-            return {"error": "需要用户确认后才能执行自定义代码。请先询问用户。"}
+# post_service/mcp_tools/run_bash.py
+def register(mcp, engine):
+    @mcp.tool()
+    def runBash(command: str, session_id: str = "default",
+                timeout: int = 60) -> dict:
+        """Execute a shell command. Requires user confirmation.
+        Use for: ffmpeg, file operations, system commands.
+        Do NOT use for dangerous commands (rm -rf, sudo, etc.)."""
+        proc = subprocess.run(
+            command, shell=True, capture_output=True, text=True,
+            timeout=timeout, cwd=work_dir,
+        )
+        return {
+            "stdout": proc.stdout[-max_chars:],
+            "stderr": proc.stderr[-max_chars:],
+            "exit_code": proc.returncode,
+        }
 ```
 
-### 12.3 对话流程
+```python
+# post_service/mcp_tools/run_python.py
+def register(mcp, engine):
+    @mcp.tool()
+    def runPython(code: str, session_id: str = "default",
+                  timeout: int = 60) -> dict:
+        """Execute Python code in an isolated subprocess.
+        Pre-installed: numpy, matplotlib, imageio, pandas, vtk.
+        Use for: plotting, data processing, file conversion.
+        Output files should be saved to the session's output directory."""
+        # 写入临时文件 → subprocess 执行 → 收集输出和产物
+```
+
+#### Mode B: 进程内执行（runEngineCode）
+
+```python
+# post_service/mcp_tools/run_engine_code.py
+def register(mcp, engine):
+    @mcp.tool()
+    def runEngineCode(code: str, session_id: str = "default",
+                      timeout: int = 60) -> dict:
+        """Execute Python code with access to the loaded PostEngine session.
+        Available variables:
+          - post_data: PostData object (get_scalar, get_points, get_zones, etc.)
+          - vtk_data: raw vtkMultiBlockDataSet
+          - output_dir: directory for saving output files
+          - np, vtk: pre-imported numpy and vtk modules
+        Use for: custom VTK pipelines, in-memory data analysis beyond built-in algorithms."""
+        state = engine.session_mgr.get(session_id)
+        namespace = {
+            "post_data": state.post_data,
+            "vtk_data": state.post_data.get_vtk_data(),
+            "output_dir": state.output_dir,
+            "np": numpy, "vtk": vtk,
+        }
+        exec(code, namespace)  # 受 Harness 超时 + 长度限制约束
+```
+
+### 12.4 Coding Agent 迭代循环
+
+与简单的"一次性执行工具"不同，Coding 子 Agent 可以**多轮迭代**：
 
 ```
-用户："帮我画一个壁面压力分布曲线"
-AI：  "当前工具没有绘图功能。我可以编写 Python 脚本来：
-       1. 提取 wall 区域的坐标和压力数据
-       2. 用 matplotlib 生成压力分布曲线
-       是否允许执行？"
+Coding 子 Agent 内部循环:
+
+  LLM 思考 → 写代码
+       │
+       ▼
+  调 runPython / runBash / runEngineCode
+       │
+       ▼
+  检查输出 ──→ 成功? ──→ 返回摘要给主 Agent → 销毁
+       │
+       ▼ 失败/不满意
+  读取 stderr / 分析输出
+       │
+       ▼
+  修改代码 → 重新执行（最多 N 轮）
+```
+
+这是 Coding Agent 和纯工具的核心区别：**工具只能执行一次，Agent 能调试**。例如：
+
+```
+# 第 1 轮：matplotlib 中文字体报错
+runPython("import matplotlib; matplotlib.rcParams['font.family'] = '微软雅黑'; ...")
+→ stderr: "findfont: Font family '微软雅黑' not found"
+
+# 第 2 轮：Coding Agent 自动修复
+runPython("import matplotlib; matplotlib.rcParams['font.sans-serif'] = ['SimHei']; ...")
+→ 成功，生成 cp_distribution.png
+```
+
+### 12.5 对话流程
+
+```
+用户："把这 5 个切片合成 GIF 动画"
+主 Agent：
+  判断 → 没有 GIF 合成 method → 需要 Coding
+  先问用户："我需要编写代码来合成 GIF，是否允许？"
 用户："可以"
-AI：  执行脚本 → 返回图片路径
+主 Agent：
+  session.user_confirmed_coding = True
+  创建 Coding 子 Agent，任务描述：
+    "将 D:/.../Render/ 下的 5 个 slice PNG 合成 GIF，帧率 1fps"
+
+  Coding 子 Agent（干净上下文）：
+    → runBash("ffmpeg -framerate 1 -i ... -loop 0 tail_vortex.gif")
+    → 检查 exit_code → 成功
+    → 返回摘要："GIF 已生成：D:/.../Render/tail_vortex.gif (5帧, 1fps)"
+    → 销毁
+
+主 Agent：收到摘要 + 文件路径 → 推送到 Artifact → 回复用户
 ```
 
-### 12.4 安全约束（Harness 层）
+### 12.6 安全约束（Harness 层）
+
+现有 Harness 已实现的检查（[harness.py:37-41](../agent/harness.py)）：
+
+| 约束 | 说明 | 实现位置 |
+|------|------|---------|
+| **执行前必须用户确认** | `user_confirmed_coding` 标志位，前端确认弹窗设置 | Harness.before_call |
+| **危险命令拦截** | `rm -rf /`, `sudo`, `shutdown` 等直接拒绝 | Harness.before_call |
+| **脚本长度限制** | 单次代码不超过 5000 字符（防止 LLM 生成巨型脚本） | Harness.before_call |
+| **执行超时** | 默认 60 秒超时强制终止 | subprocess.run(timeout=) |
+| **输出截断** | stdout/stderr 超过 max_return_chars 截断 | Harness.after_call |
+
+#### Mode B 额外约束
+
+`runEngineCode` 在 PostService 进程内执行，风险更高，需要额外限制：
 
 | 约束 | 说明 |
 |------|------|
-| 执行前必须用户确认 | AI 不能静默执行代码 |
-| 脚本长度限制 | 单次脚本不超过 2000 字符 |
-| 执行超时 | 60 秒超时强制终止 |
-| 危险命令拦截 | rm/sudo/shutdown 等直接拒绝 |
-| 输出截断 | 结果超过 5000 字符截断 |
+| **只读访问 PostData** | namespace 中的 `post_data` 返回的 numpy 数组 `writeable=False` |
+| **禁止 import 危险模块** | 拦截 `os.system`, `subprocess`, `socket` 等（通过受限 `__builtins__`） |
+| **独立线程 + 超时** | 在 daemon 线程中执行，超时后强制终止 |
+| **不暴露 engine 对象** | namespace 只给 `post_data` 和 `vtk_data`，不给 `engine` 本身 |
+
+### 12.7 工具选择指引（写入 Skill 层）
+
+Coding 子 Agent 的 system prompt 需要包含工具选择规则：
+
+```
+## 工具选择
+- 文件操作、ffmpeg、简单命令 → runBash
+- matplotlib 画图、数据处理、imageio → runPython
+- 需要访问已加载的 VTK/标量数据 → runEngineCode
+- 能用现有 MCP 工具完成的 → 不要写代码（调 calculate/exportData 等）
+```
+
+### 12.8 实施路径
+
+| 阶段 | 内容 | 依赖 |
+|------|------|------|
+| **Phase 2a** | `runBash` + `runPython`（Mode A，子进程） | Harness 已就绪，只需注册 MCP 工具 |
+| **Phase 2b** | Coding 子 Agent 迭代循环（sub_agent.py） | Phase 2a + 子 Agent 框架 |
+| **Phase 3** | `runEngineCode`（Mode B，进程内） | Phase 2b + 安全沙箱验证 |
+| **Phase 3** | 前端确认弹窗 + Coding Artifact | Phase 2a |
 
 ---
 
