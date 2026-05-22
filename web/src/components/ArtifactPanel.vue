@@ -406,4 +406,30 @@ const viewerType = computed(() => {
   border-radius: 8px;
   background: var(--bg-tertiary);
 }
+
+/* ───────────── Mobile (≤768px) ───────────── */
+@media (max-width: 768px) {
+  .viewer-area {
+    padding: 10px 12px;
+  }
+
+  .artifact-header {
+    padding: 10px 12px;
+    min-height: 44px;
+  }
+
+  /* Larger tap target — this × is the "back to chat" action on mobile */
+  .close-btn {
+    width: 38px;
+    height: 38px;
+  }
+
+  .file-name {
+    max-width: 110px;
+  }
+
+  .header-file-hint {
+    max-width: 120px;
+  }
+}
 </style>

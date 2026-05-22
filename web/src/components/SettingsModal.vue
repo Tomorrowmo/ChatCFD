@@ -241,4 +241,41 @@ function onBackdropClick(e) {
   background: var(--bg-tertiary);
   color: var(--text-primary);
 }
+
+/* ───────────── Mobile (≤768px): bottom sheet ───────────── */
+@media (max-width: 768px) {
+  .modal-backdrop {
+    align-items: flex-end;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92vh;
+    max-height: 92dvh;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .modal-body {
+    max-height: 64vh;
+    max-height: 64dvh;
+    overflow-y: auto;
+  }
+
+  .close-btn {
+    font-size: 28px;
+    padding: 0 8px;
+  }
+
+  .form-row select,
+  .form-row input {
+    padding: 11px 12px;
+    font-size: 16px; /* ≥16px stops iOS Safari from zooming on focus */
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    padding: 11px 18px;
+  }
+}
 </style>

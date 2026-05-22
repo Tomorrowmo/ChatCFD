@@ -1,6 +1,7 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useChatStore } from '../stores/chat.js'
+import { useBreakpoint } from '../composables/useBreakpoint.js'
 import SettingsModal from './SettingsModal.vue'
 
 const {
@@ -11,30 +12,43 @@ const {
   setActiveConversation,
 } = useChatStore()
 
-const emit = defineEmits(['update:pinned'])
+const props = defineProps({
+  mobileOpen: { type: Boolean, default: false },
+})
+const emit = defineEmits(['update:pinned', 'navigate'])
+
+const { isMobile } = useBreakpoint()
 
 const showSettings = ref(false)
-const pinned = ref(false)     // user clicked the pin button
-const hovering = ref(false)   // mouse is over sidebar
-const expanded = ref(false)   // actual expanded state (hover OR pinned)
+const pinned = ref(false)            // user clicked the pin button (desktop)
+const hovering = ref(false)          // mouse is over sidebar (desktop)
+const expandedDesktop = ref(false)   // hover OR pinned (desktop)
 let collapseTimer = null
 
+// On mobile the sidebar is a drawer: its expanded state follows mobileOpen.
+// On desktop it follows hover/pin.
+const expanded = computed(() =>
+  isMobile.value ? props.mobileOpen : expandedDesktop.value
+)
+
 function onEnter() {
+  if (isMobile.value) return
   if (collapseTimer) {
     clearTimeout(collapseTimer)
     collapseTimer = null
   }
   hovering.value = true
-  expanded.value = true
+  expandedDesktop.value = true
 }
 
 function onLeave() {
+  if (isMobile.value) return
   hovering.value = false
   if (pinned.value) return
   // Small delay so small mouse movements don't cause flicker
   collapseTimer = setTimeout(() => {
     if (!hovering.value && !pinned.value) {
-      expanded.value = false
+      expandedDesktop.value = false
     }
   }, 150)
 }
@@ -43,18 +57,20 @@ function togglePin() {
   pinned.value = !pinned.value
   emit('update:pinned', pinned.value)
   if (pinned.value) {
-    expanded.value = true
+    expandedDesktop.value = true
   } else if (!hovering.value) {
-    expanded.value = false
+    expandedDesktop.value = false
   }
 }
 
 function onNewChat() {
   createConversation('新对话')
+  emit('navigate')
 }
 
 function onSelect(id) {
   setActiveConversation(id)
+  emit('navigate')
 }
 
 function onDelete(id, ev) {
@@ -62,6 +78,11 @@ function onDelete(id, ev) {
   if (confirm('删除这个对话？')) {
     deleteConversation(id)
   }
+}
+
+function onOpenSettings() {
+  showSettings.value = true
+  emit('navigate')
 }
 
 function relativeTime(iso) {
@@ -78,7 +99,7 @@ function relativeTime(iso) {
 <template>
   <aside
     class="sidebar"
-    :class="{ expanded, pinned }"
+    :class="{ expanded, pinned, mobile: isMobile, 'mobile-open': isMobile && mobileOpen }"
     @mouseenter="onEnter"
     @mouseleave="onLeave"
   >
@@ -93,7 +114,7 @@ function relativeTime(iso) {
       <span class="brand" v-show="expanded">ChatCFD</span>
       <button
         class="icon-btn pin-btn"
-        v-show="expanded"
+        v-show="expanded && !isMobile"
         @click="togglePin"
         :title="pinned ? '取消固定' : '固定展开'"
       >
@@ -102,6 +123,17 @@ function relativeTime(iso) {
         </svg>
         <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M9 5 H19 M15 5 v6 l3 3 H6 l3-3 V5 M12 14 v7" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <!-- Mobile: close drawer -->
+      <button
+        class="icon-btn close-btn"
+        v-show="isMobile && mobileOpen"
+        @click="emit('navigate')"
+        title="关闭"
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6 6 18 M6 6 l12 12" stroke-linecap="round"/>
         </svg>
       </button>
     </div>
@@ -148,7 +180,7 @@ function relativeTime(iso) {
     <div class="spacer"></div>
 
     <!-- Settings -->
-    <button class="nav-item" @click="showSettings = true" title="设置">
+    <button class="nav-item" @click="onOpenSettings" title="设置">
       <span class="nav-icon">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="3"/>
@@ -235,6 +267,10 @@ function relativeTime(iso) {
 .pin-btn {
   width: 24px;
   height: 24px;
+}
+
+.close-btn {
+  margin-left: auto;
 }
 
 .nav-item {
@@ -377,5 +413,36 @@ function relativeTime(iso) {
 
 .spacer {
   flex: 1;
+}
+
+/* ───────────── Mobile (≤768px): off-canvas drawer ───────────── */
+@media (max-width: 768px) {
+  .sidebar,
+  .sidebar.expanded {
+    width: 280px;
+    max-width: 85vw;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: none;
+  }
+
+  .sidebar.mobile-open {
+    transform: translateX(0);
+    box-shadow: 2px 0 24px rgba(0, 0, 0, 0.35);
+  }
+
+  /* Bigger touch targets */
+  .nav-item {
+    height: 44px;
+  }
+
+  .conv-item {
+    padding-top: 11px;
+    padding-bottom: 11px;
+  }
+
+  .delete-btn {
+    opacity: 0.6;
+  }
 }
 </style>

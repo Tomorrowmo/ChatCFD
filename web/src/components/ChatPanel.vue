@@ -9,6 +9,8 @@ const store = useChatStore()
 const { activeConversation, activeMessages, addMessage, createConversation, activeArtifacts } = store
 const ws = useWebSocket()
 
+const emit = defineEmits(['open-menu'])
+
 const inputText = ref('')
 const messageListRef = ref(null)
 const isDragging = ref(false)
@@ -211,6 +213,11 @@ function stopProcessing() {
 <template>
   <div class="chat-panel" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop" :class="{ 'drag-over': isDragging }">
     <div class="chat-header">
+      <button class="menu-btn" @click="emit('open-menu')" title="菜单" aria-label="菜单">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 6h18M3 12h18M3 18h18" stroke-linecap="round"/>
+        </svg>
+      </button>
       <h2 class="truncate">{{ title }}</h2>
       <span class="badge">Phase 1</span>
     </div>
@@ -286,6 +293,11 @@ function stopProcessing() {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* min-height:0 — without it this flex item's default min-height:auto lets
+     tall content (welcome screen) stretch it past height:100%, pushing the
+     header or input out of view. */
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg-primary);
 }
 
@@ -510,5 +522,69 @@ function stopProcessing() {
   outline: 2px dashed var(--accent);
   outline-offset: -4px;
   background: color-mix(in srgb, var(--accent) 5%, var(--bg-primary));
+}
+
+/* Hamburger — opens the sidebar drawer; mobile only */
+.menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-left: -6px;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.menu-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* ───────────── Mobile (≤768px) ───────────── */
+@media (max-width: 768px) {
+  .menu-btn {
+    display: flex;
+  }
+
+  .chat-header {
+    padding: 12px 14px;
+  }
+
+  .message-list {
+    padding: 12px 14px;
+  }
+
+  .input-area {
+    padding: 12px 14px;
+    gap: 8px;
+  }
+
+  .input-area textarea {
+    font-size: 16px; /* ≥16px stops iOS Safari zoom-on-focus */
+  }
+
+  .welcome {
+    margin: 12px auto;
+    gap: 16px;
+  }
+
+  .welcome-title {
+    font-size: 20px;
+  }
+
+  /* Sample cards stack to one column */
+  .sample-card {
+    min-width: 100%;
+  }
+
+  /* Comfortable tap target for Send/Stop */
+  .send-btn,
+  .stop-btn {
+    padding: 12px 18px;
+  }
 }
 </style>

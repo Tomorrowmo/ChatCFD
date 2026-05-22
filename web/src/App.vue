@@ -1,10 +1,11 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import ArtifactPanel from './components/ArtifactPanel.vue'
 import ArtifactList from './components/ArtifactList.vue'
 import { useChatStore } from './stores/chat.js'
+import { useBreakpoint } from './composables/useBreakpoint.js'
 
 const { state, activeArtifacts, closeArtifactList, openArtifactList } = useChatStore()
 const panelOpen = computed(() => state.artifactPanelOpen)
@@ -12,6 +13,16 @@ const listVisible = computed(() => state.artifactListVisible)
 const hasArtifacts = computed(() => activeArtifacts.value.length > 0)
 const artifactCount = computed(() => activeArtifacts.value.length)
 const sidebarPinned = ref(false)
+
+const { isMobile } = useBreakpoint()
+const mobileDrawerOpen = ref(false)
+
+// Leaving mobile closes the drawer; entering mobile drops the pinned state
+// (a pinned rail makes no sense on a phone-width single-column layout).
+watch(isMobile, (m) => {
+  if (!m) mobileDrawerOpen.value = false
+  else sidebarPinned.value = false
+})
 </script>
 
 <template>
@@ -20,16 +31,27 @@ const sidebarPinned = ref(false)
     'list-visible': !panelOpen && listVisible && hasArtifacts,
     'sidebar-pinned': sidebarPinned
   }">
-    <Sidebar @update:pinned="v => sidebarPinned = v" />
+    <Sidebar
+      :mobile-open="mobileDrawerOpen"
+      @update:pinned="v => sidebarPinned = v"
+      @navigate="mobileDrawerOpen = false"
+    />
     <div class="sidebar-rail"></div>
+
+    <!-- Mobile: tap-to-dismiss scrim behind the drawer -->
+    <div
+      v-if="isMobile && mobileDrawerOpen"
+      class="drawer-overlay"
+      @click="mobileDrawerOpen = false"
+    ></div>
 
     <div class="chat-side">
       <div class="chat-wrapper">
-        <ChatPanel />
+        <ChatPanel @open-menu="mobileDrawerOpen = true" />
       </div>
     </div>
 
-    <!-- State A: full viewer -->
+    <!-- State A: full viewer (desktop: 3rd column / mobile: full-screen cover) -->
     <div class="artifact-side" v-if="panelOpen">
       <ArtifactPanel />
     </div>
@@ -63,8 +85,12 @@ const sidebarPinned = ref(false)
 .app-layout {
   display: grid;
   grid-template-columns: 56px 1fr;
-  width: 100vw;
-  height: 100vh;
+  /* Pin the row to the viewport — without this the implicit row is `auto`
+     and tall content (e.g. the welcome screen) stretches it past the
+     viewport, pushing the chat input out of the clipped area. */
+  grid-template-rows: minmax(0, 1fr);
+  width: 100%;
+  height: 100%;        /* #app is fixed/inset:0, so 100% = real viewport */
   overflow: hidden;
   position: relative;
   transition: grid-template-columns 0.25s ease;
@@ -109,6 +135,7 @@ const sidebarPinned = ref(false)
   width: 100%;
   max-width: 800px;
   height: 100%;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -183,6 +210,14 @@ const sidebarPinned = ref(false)
   color: var(--text-primary);
 }
 
+/* Mobile drawer scrim */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 49;
+}
+
 /* State C: floating reopen button */
 .reopen-btn {
   position: fixed;
@@ -208,5 +243,35 @@ const sidebarPinned = ref(false)
   background: var(--bg-tertiary);
   color: var(--text-primary);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* ───────────── Mobile (≤768px): collapse to single column ───────────── */
+@media (max-width: 768px) {
+  .app-layout,
+  .app-layout.sidebar-pinned,
+  .app-layout.list-visible,
+  .app-layout.sidebar-pinned.list-visible,
+  .app-layout.panel-open,
+  .app-layout.sidebar-pinned.panel-open {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar-rail {
+    display: none;
+  }
+
+  .chat-side {
+    grid-column: 1;
+  }
+
+  /* Artifact / history slide over the chat full-screen instead of a 3rd column */
+  .artifact-side,
+  .list-side {
+    grid-column: 1;
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    border-left: none;
+  }
 }
 </style>

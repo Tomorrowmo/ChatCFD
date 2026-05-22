@@ -39,8 +39,10 @@ body {
 
 #app {
   display: flex;
-  width: 100vw;
-  height: 100vh;
+  /* Anchor to the real visual viewport — immune to mobile address-bar
+     show/hide, which makes vh/dvh units unreliable. */
+  position: fixed;
+  inset: 0;
   overflow: hidden;
 }
 
