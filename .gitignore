@@ -28,3 +28,13 @@ docs/*.html
 # OS
 .DS_Store
 Thumbs.db
+
+# Release artifacts
+dist-release/
+ChatCFD-Release*.zip
+web/dist/
+
+# PyInstaller
+build/
+dist/
+*.spec

@@ -39,6 +39,15 @@ app.mount("/mcp", sse_app)
 # Register HTTP API routes
 setup_http_api(app, engine)
 
+# Mount frontend static files if a build exists (release mode).
+# Must be mounted LAST so /api/* and /mcp/* take precedence.
+_WEB_DIST = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "web", "dist")
+)
+if os.path.isfile(os.path.join(_WEB_DIST, "index.html")):
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=_WEB_DIST, html=True), name="web")
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("POST_SERVICE_PORT", "8001")))
