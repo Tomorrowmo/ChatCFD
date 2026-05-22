@@ -4,6 +4,7 @@ import { POST_SERVICE_URL } from '../config.js'
 import VtkViewer from './VtkViewer.vue'
 import TimeControls from './TimeControls.vue'
 import { useChatStore } from '../stores/chat.js'
+import { useFrameExport } from '../composables/useFrameExport.js'
 
 const props = defineProps({
   data: Object, // loadFile summary (initial data, refreshed from API)
@@ -17,10 +18,15 @@ const selectedScalar = ref('')
 const displayMode = ref('surface')  // 'surface' | 'surface+edges' | 'wireframe'
 const opacity = ref(1.0)
 const colorPreset = ref('jet')
+const renderMode = ref('scalar')  // 'scalar' | 'vector'
+const selectedVector = ref('')
+const arrowScale = ref(1.0)
+const availableVectors = ref([])  // populated by VtkViewer's arrays-detected event
 const liveZones = ref([])
 const loading = ref(false)
 const currentFrame = ref(0)
 const timeControlsRef = ref(null)
+const viewerRef = ref(null)
 const liveFrameCount = ref(0)
 const liveTimeLabels = ref([])
 const maxCache = ref(50)
@@ -54,25 +60,31 @@ const currentScalarRange = computed(() => {
 
 // Use live data if available, fall back to artifact snapshot
 const zones = computed(() => liveZones.value.length ? liveZones.value : (props.data?.zones || []))
+// Dedup key: prefer display_name (so two raw names mapping to the same
+// physical quantity collapse into one entry), fall back to standard_name,
+// then raw_name. Same key is used for __all__ union and single-zone view.
+function dedupKey(s) {
+  return s.display_name || s.standard_name || s.raw_name
+}
+
 const currentZoneScalars = computed(() => {
-  let scalars
+  let source
   if (selectedZone.value === '__all__') {
-    // Union of scalars across all zones (deduplicated by raw_name)
-    const seen = new Set()
-    scalars = []
-    for (const z of zones.value) {
-      for (const s of (z.scalars || [])) {
-        if (!seen.has(s.raw_name)) {
-          seen.add(s.raw_name)
-          scalars.push(s)
-        }
-      }
-    }
+    source = zones.value.flatMap((z) => z.scalars || [])
   } else {
     const z = zones.value.find((x) => x.name === selectedZone.value)
-    scalars = z?.scalars || []
+    source = z?.scalars || []
   }
-  return [...scalars].sort((a, b) => (a.display_name || a.raw_name).localeCompare(b.display_name || b.raw_name))
+  const seen = new Set()
+  const scalars = []
+  for (const s of source) {
+    const key = dedupKey(s)
+    if (!seen.has(key)) {
+      seen.add(key)
+      scalars.push(s)
+    }
+  }
+  return scalars.sort((a, b) => dedupKey(a).localeCompare(dedupKey(b)))
 })
 
 const fileParam = computed(() => props.sourceFile ? `?file=${encodeURIComponent(props.sourceFile)}` : '')
@@ -143,6 +155,34 @@ async function updateMaxCache(val) {
 
 onMounted(() => { refreshZones() })
 watch(sessionId, () => { refreshZones() })
+
+// When the viewer reports the arrays present in the current frame, refresh
+// our vector list and keep the user's pick if it still exists.
+function onArraysDetected({ scalars, vectors }) {
+  availableVectors.value = vectors || []
+  if (selectedVector.value && !availableVectors.value.includes(selectedVector.value)) {
+    selectedVector.value = availableVectors.value[0] || ''
+  } else if (!selectedVector.value && availableVectors.value.length) {
+    selectedVector.value = availableVectors.value[0]
+  }
+}
+
+// Falling out of vector mode when no vectors are available
+watch(availableVectors, (v) => {
+  if (renderMode.value === 'vector' && !v.length) renderMode.value = 'scalar'
+})
+
+// Frame-sequence export (PNG zip / GIF)
+const {
+  exporting, progress: exportProgress, exportLabel,
+  notifyLoaded, cancel: cancelExport, exportPNG, exportGIF, exportWEBM,
+} = useFrameExport({ viewerRef, currentFrame, frameCount })
+
+// VtkViewer 'loaded' drives both playback advance and export frame stepping
+function onFrameLoaded() {
+  timeControlsRef.value?.frameReady()
+  notifyLoaded()
+}
 </script>
 
 <template>
@@ -157,7 +197,14 @@ watch(sessionId, () => { refreshZones() })
           </option>
         </select>
       </label>
-      <label>
+      <label class="mode-toggle">
+        Mode:
+        <span class="seg">
+          <button :class="{ on: renderMode === 'scalar' }" @click="renderMode = 'scalar'">标量</button>
+          <button :class="{ on: renderMode === 'vector' }" @click="renderMode = 'vector'" :disabled="!availableVectors.length" :title="availableVectors.length ? '' : '当前数据无向量字段'">向量</button>
+        </span>
+      </label>
+      <label v-if="renderMode === 'scalar'">
         Scalar:
         <select v-model="selectedScalar">
           <option value="">None (geometry)</option>
@@ -165,6 +212,17 @@ watch(sessionId, () => { refreshZones() })
             {{ s.display_name || s.raw_name }}
           </option>
         </select>
+      </label>
+      <label v-else>
+        Vector:
+        <select v-model="selectedVector">
+          <option v-for="v in availableVectors" :key="v" :value="v">{{ v }}</option>
+        </select>
+      </label>
+      <label v-if="renderMode === 'vector'" class="opacity-label">
+        Arrow:
+        <input type="range" v-model.number="arrowScale" min="0.1" max="5" step="0.1" class="opacity-slider" />
+        <span class="opacity-val">{{ arrowScale.toFixed(1) }}×</span>
       </label>
       <label>
         Display:
@@ -199,6 +257,7 @@ watch(sessionId, () => { refreshZones() })
         ref="timeControlsRef"
         :frameCount="frameCount"
         :timeLabels="timeLabels"
+        :bookmarkKey="`${sessionId}:${sourceFile}`"
         v-model="currentFrame"
       />
       <label class="cache-label">
@@ -213,9 +272,21 @@ watch(sessionId, () => { refreshZones() })
           <option :value="frameCount">All ({{ frameCount }})</option>
         </select>
       </label>
+      <span class="export-group">
+        <template v-if="!exporting">
+          <button class="exp-btn" @click="exportPNG" title="导出每帧 PNG（打包为 ZIP）">导出 PNG</button>
+          <button class="exp-btn" @click="exportGIF(5)" title="导出 GIF 动画">导出 GIF</button>
+          <button class="exp-btn" @click="exportWEBM(10)" title="导出 WEBM 视频">导出 WEBM</button>
+        </template>
+        <template v-else>
+          <span class="exp-progress">{{ exportLabel }} {{ Math.round(exportProgress * 100) }}%</span>
+          <button class="exp-btn exp-cancel" @click="cancelExport">取消</button>
+        </template>
+      </span>
     </div>
     <VtkViewer
-      :key="`${sessionId}-${sourceFile}-${selectedZone}-${selectedScalar}-${displayMode}-${colorPreset}`"
+      ref="viewerRef"
+      :key="`${sessionId}-${sourceFile}-${selectedZone}-${selectedScalar}-${displayMode}-${colorPreset}-${renderMode}-${selectedVector}`"
       :sessionId="sessionId"
       :sourceFile="sourceFile"
       :zone="selectedZone"
@@ -225,7 +296,11 @@ watch(sessionId, () => { refreshZones() })
       :colorPreset="colorPreset"
       :frame="currentFrame"
       :scalarRange="currentScalarRange"
-      @loaded="timeControlsRef?.frameReady()"
+      :renderMode="renderMode"
+      :vectorName="selectedVector"
+      :arrowScale="arrowScale"
+      @loaded="onFrameLoaded"
+      @arrays-detected="onArraysDetected"
     />
   </div>
 </template>
@@ -283,6 +358,54 @@ watch(sessionId, () => { refreshZones() })
 .opacity-label { white-space: nowrap; }
 .opacity-slider { width: 70px; vertical-align: middle; accent-color: var(--accent); }
 .opacity-val { display: inline-block; width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.mode-toggle .seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.mode-toggle .seg button {
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mode-toggle .seg button.on {
+  background: var(--accent);
+  color: #fff;
+}
+.mode-toggle .seg button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.mode-toggle .seg button + button { border-left: 1px solid var(--border); }
+
+.export-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.exp-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.exp-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+.exp-cancel { color: #d66; border-color: #d66; }
+.exp-progress {
+  font-size: 11px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
 .time-row {
   display: flex;

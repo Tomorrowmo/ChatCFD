@@ -3,14 +3,20 @@ import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { POST_SERVICE_URL } from '../config.js'
 
 import '@kitware/vtk.js/Rendering/Profiles/Geometry'
+import '@kitware/vtk.js/Rendering/Profiles/Glyph'
 import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow'
 import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor'
 import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper'
+import vtkGlyph3DMapper from '@kitware/vtk.js/Rendering/Core/Glyph3DMapper'
+import vtkArrowSource from '@kitware/vtk.js/Filters/Sources/ArrowSource'
 import vtkXMLPolyDataReader from '@kitware/vtk.js/IO/XML/XMLPolyDataReader'
 import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction'
 import vtkScalarBarActor from '@kitware/vtk.js/Rendering/Core/ScalarBarActor'
 import vtkAxesActor from '@kitware/vtk.js/Rendering/Core/AxesActor'
 import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget'
+import { inspectAndSynthesize, computeAutoScale, subsampleForGlyphs } from '../composables/vtkVectorUtils.js'
+
+const MAX_ARROWS = 5000  // glyph count cap — above this, points are strided
 
 const props = defineProps({
   sessionId: { type: String, default: 'default' },
@@ -23,12 +29,21 @@ const props = defineProps({
   colorPreset: { type: String, default: 'jet' },
   frame: { type: Number, default: 0 },
   scalarRange: { type: Array, default: null },  // [min, max] global range across all frames
+  renderMode: { type: String, default: 'scalar' },  // 'scalar' | 'vector'
+  vectorName: { type: String, default: '' },
+  arrowScale: { type: Number, default: 1.0 },
 })
 
-const emit = defineEmits(['loaded'])
+const emit = defineEmits(['loaded', 'arrays-detected'])
 
 let hasLoadedOnce = false  // track first load for resetCamera
 let loadGeneration = 0     // monotonic counter — stale loadData() calls won't emit 'loaded'
+
+// Vector-mode runtime state: kept so arrowScale prop changes can mutate the
+// glyph mapper without re-fetching the VTP. Reset on every loadData() call.
+let currentPolydata = null
+let currentGlyphMapper = null
+let currentVectorMaxMag = null
 
 const colorPresets = {
   jet:         [[0,0,0,1], [0.25,0,1,1], [0.5,0,1,0], [0.75,1,1,0], [1,1,0,0]],
@@ -39,8 +54,11 @@ const colorPresets = {
   blueRed:     [[0,0,0,1], [1,1,0,0]],
 }
 
+// inspectAndSynthesize and computeAutoScale moved to composables/vtkVectorUtils.js
+
 const containerRef = ref(null)
 const statusMsg = ref('')
+const vectorHint = ref('')  // e.g. "已抽稀至 5000 个箭头 (每 12 点取 1)"
 let fullScreenRenderer = null
 
 onMounted(() => {
@@ -72,9 +90,22 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.sessionId, props.zone, props.scalarName, props.frame],
+  () => [props.sessionId, props.zone, props.scalarName, props.frame, props.renderMode, props.vectorName],
   () => {
     if (props.zone) loadData()
+  }
+)
+
+// Arrow scale only affects glyph mapper — no need to re-fetch
+watch(
+  () => props.arrowScale,
+  () => {
+    if (currentGlyphMapper && currentVectorMaxMag != null && currentPolydata) {
+      currentGlyphMapper.setScaleFactor(
+        computeAutoScale(currentPolydata, currentVectorMaxMag) * props.arrowScale
+      )
+      fullScreenRenderer?.getRenderWindow().render()
+    }
   }
 )
 
@@ -150,82 +181,24 @@ async function loadData() {
     reader.parseAsArrayBuffer(vtpBuffer)
     const polydata = reader.getOutputData(0)
 
-    // Debug: list available arrays
-    const pointArrNames = []
-    const cellArrNames = []
-    const pd = polydata.getPointData()
-    const cd = polydata.getCellData()
-    for (let i = 0; i < pd.getNumberOfArrays(); i++) pointArrNames.push(pd.getArrayByIndex(i).getName())
-    for (let i = 0; i < cd.getNumberOfArrays(); i++) cellArrNames.push(cd.getArrayByIndex(i).getName())
-    console.log('[VtkViewer] Loaded polydata. Point arrays:', pointArrNames, 'Cell arrays:', cellArrNames)
-    console.log('[VtkViewer] Requested scalar:', props.scalarName)
+    // Identify scalars/vectors + synthesize _x/_y/_z triplets in place
+    const info = inspectAndSynthesize(polydata)
+    console.log(`[VtkViewer] scalars=${info.scalars.length}, vectors=${info.vectors.length} ${info.vectors.length ? '['+info.vectors.join(',')+']' : ''}`)
+    emit('arrays-detected', { scalars: info.scalars, vectors: info.vectors })
 
     const renderer = fullScreenRenderer.getRenderer()
     const renderWindow = fullScreenRenderer.getRenderWindow()
-
-    // Clear previous actors / scalar bars
     renderer.removeAllViewProps()
 
-    const mapper = vtkMapper.newInstance()
-    mapper.setInputData(polydata)
+    currentPolydata = polydata
+    currentGlyphMapper = null
+    currentVectorMaxMag = null
 
-    // Apply scalar coloring if requested
-    let coloredArrayName = null
-    if (props.scalarName) {
-      let arr = pd.getArrayByName(props.scalarName)
-      let useCellData = false
-      if (!arr) {
-        arr = cd.getArrayByName(props.scalarName)
-        useCellData = true
-      }
-      if (arr) {
-        const perFrame = arr.getRange()
-        // Use global range (consistent across all frames) if provided, else per-frame
-        const [lo, hi] = props.scalarRange || perFrame
-        console.log(`[VtkViewer] Found scalar '${props.scalarName}' (${useCellData ? 'cell' : 'point'}), range=[${lo}, ${hi}]${props.scalarRange ? ' (global)' : ' (per-frame)'}`)
-
-        // Build LUT from color preset
-        const ctf = vtkColorTransferFunction.newInstance()
-        const preset = colorPresets[props.colorPreset] || colorPresets.jet
-        for (const [t, r, g, b] of preset) {
-          ctf.addRGBPoint(lo + t * (hi - lo), r, g, b)
-        }
-
-        // VTK.js scalar coloring: set active scalar on the dataset, then wire mapper
-        if (useCellData) {
-          cd.setActiveScalars(props.scalarName)
-          mapper.setScalarModeToUseCellData()
-        } else {
-          pd.setActiveScalars(props.scalarName)
-          mapper.setScalarModeToUsePointData()
-        }
-        mapper.setLookupTable(ctf)
-        mapper.setUseLookupTableScalarRange(false)
-        mapper.setScalarRange(lo, hi)
-        mapper.setScalarVisibility(true)
-        mapper.setColorByArrayName(props.scalarName)
-
-        coloredArrayName = props.scalarName
-
-        // Scalar bar
-        const bar = vtkScalarBarActor.newInstance()
-        bar.setScalarsToColors(ctf)
-        bar.setAxisLabel(props.scalarName)
-        renderer.addActor(bar)
-      } else {
-        console.warn(`[VtkViewer] Scalar '${props.scalarName}' NOT FOUND in polydata. Available point arrays:`, pointArrNames, 'cell arrays:', cellArrNames)
-      }
+    if (props.renderMode === 'vector' && props.vectorName) {
+      renderVector(polydata, info)
+    } else {
+      renderScalar(polydata)
     }
-
-    const actor = vtkActor.newInstance()
-    actor.setMapper(mapper)
-    actor.getProperty().setOpacity(props.opacity)
-    if (!coloredArrayName) {
-      actor.getProperty().setColor(0.7, 0.7, 0.75)
-    }
-    // Apply display mode
-    applyDisplayMode(actor)
-    renderer.addActor(actor)
 
     if (!hasLoadedOnce) {
       renderer.resetCamera()
@@ -239,17 +212,154 @@ async function loadData() {
         }
       }, 300)
     } else {
-      // Keep user's camera position but update near/far clip planes for new geometry bounds
       renderer.resetCameraClippingRange()
     }
     renderWindow.render()
     statusMsg.value = ''
-    if (gen === loadGeneration) emit('loaded')  // only signal if this is the latest load
+    if (gen === loadGeneration) emit('loaded')
   } catch (err) {
     statusMsg.value = `Failed to load: ${err.message}`
     console.error('VtkViewer error:', err)
     if (gen === loadGeneration) emit('loaded')  // still signal so playback doesn't hang
   }
+}
+
+// Scalar rendering: colored surface by props.scalarName, with optional
+// global scalarRange for cross-frame colorbar consistency.
+function renderScalar(polydata) {
+  vectorHint.value = ''
+  const renderer = fullScreenRenderer.getRenderer()
+  const pd = polydata.getPointData()
+  const cd = polydata.getCellData()
+
+  const mapper = vtkMapper.newInstance()
+  mapper.setInputData(polydata)
+
+  let coloredArrayName = null
+  if (props.scalarName) {
+    let arr = pd.getArrayByName(props.scalarName)
+    let useCellData = false
+    if (!arr) {
+      arr = cd.getArrayByName(props.scalarName)
+      useCellData = true
+    }
+    if (arr) {
+      const [lo, hi] = props.scalarRange || arr.getRange()
+      const ctf = vtkColorTransferFunction.newInstance()
+      const preset = colorPresets[props.colorPreset] || colorPresets.jet
+      for (const [t, r, g, b] of preset) {
+        ctf.addRGBPoint(lo + t * (hi - lo), r, g, b)
+      }
+      if (useCellData) {
+        cd.setActiveScalars(props.scalarName)
+        mapper.setScalarModeToUseCellData()
+      } else {
+        pd.setActiveScalars(props.scalarName)
+        mapper.setScalarModeToUsePointData()
+      }
+      mapper.setLookupTable(ctf)
+      mapper.setUseLookupTableScalarRange(false)
+      mapper.setScalarRange(lo, hi)
+      mapper.setScalarVisibility(true)
+      mapper.setColorByArrayName(props.scalarName)
+      coloredArrayName = props.scalarName
+
+      const bar = vtkScalarBarActor.newInstance()
+      bar.setScalarsToColors(ctf)
+      bar.setAxisLabel(props.scalarName)
+      renderer.addActor(bar)
+    } else {
+      console.warn(`[VtkViewer] Scalar '${props.scalarName}' not found in polydata`)
+    }
+  }
+
+  const actor = vtkActor.newInstance()
+  actor.setMapper(mapper)
+  actor.getProperty().setOpacity(props.opacity)
+  if (!coloredArrayName) {
+    actor.getProperty().setColor(0.7, 0.7, 0.75)
+  }
+  applyDisplayMode(actor)
+  renderer.addActor(actor)
+}
+
+// Vector rendering: translucent base mesh + arrow glyphs oriented by
+// props.vectorName, scaled by magnitude, colored by <vec>_Magnitude.
+// Glyph count is capped at MAX_ARROWS — large zones are point-strided.
+function renderVector(polydata, info) {
+  const renderer = fullScreenRenderer.getRenderer()
+
+  let vecInfo = info.vectorsInfo.find(v => v.name === props.vectorName)
+  if (!vecInfo) {
+    console.warn(`[VtkViewer] Vector '${props.vectorName}' not detected — falling back to scalar render`)
+    renderScalar(polydata)
+    return
+  }
+
+  // Translucent base mesh (always the full geometry)
+  const baseMapper = vtkMapper.newInstance()
+  baseMapper.setInputData(polydata)
+  baseMapper.setScalarVisibility(false)
+  const baseActor = vtkActor.newInstance()
+  baseActor.setMapper(baseMapper)
+  baseActor.getProperty().setColor(0.5, 0.55, 0.6)
+  baseActor.getProperty().setOpacity(0.35)
+  renderer.addActor(baseActor)
+
+  // Subsample points so the glyph count stays bounded
+  const glyphResult = subsampleForGlyphs(polydata, props.vectorName, MAX_ARROWS)
+  const glyphInput = glyphResult.polydata
+  if (glyphResult.sampled) {
+    vectorHint.value = `已抽稀至 ${glyphResult.count} 个箭头（每 ${glyphResult.stride} 点取 1）`
+    console.warn(`[VtkViewer] Vector glyphs strided: ${glyphResult.count} arrows (1/${glyphResult.stride})`)
+  } else {
+    vectorHint.value = ''
+  }
+
+  // Glyph mapper + arrow source
+  const arrow = vtkArrowSource.newInstance({
+    tipResolution: 6, tipRadius: 0.1, tipLength: 0.35,
+    shaftResolution: 6, shaftRadius: 0.03,
+  })
+  const glyphMapper = vtkGlyph3DMapper.newInstance()
+  glyphMapper.setInputData(glyphInput, 0)
+  glyphMapper.setInputConnection(arrow.getOutputPort(), 1)
+  glyphMapper.setOrientationArray(props.vectorName)
+  glyphMapper.setOrientationMode(vtkGlyph3DMapper.OrientationModes.DIRECTION)
+  glyphMapper.setScaleMode(vtkGlyph3DMapper.ScaleModes.SCALE_BY_MAGNITUDE)
+  glyphMapper.setScaleArray(props.vectorName)
+  glyphMapper.setScaleFactor(computeAutoScale(polydata, vecInfo.maxMagnitude) * props.arrowScale)
+
+  // Color by magnitude (the synthesized <vec>_Magnitude array)
+  const magName = props.vectorName + '_Magnitude'
+  const magArr = glyphInput.getPointData().getArrayByName(magName)
+  if (magArr) {
+    const [lo, hi] = magArr.getRange()
+    const ctf = vtkColorTransferFunction.newInstance()
+    const preset = colorPresets[props.colorPreset] || colorPresets.jet
+    for (const [t, r, g, b] of preset) {
+      ctf.addRGBPoint(lo + t * (hi - lo), r, g, b)
+    }
+    glyphMapper.setLookupTable(ctf)
+    glyphMapper.setScalarRange(lo, hi)
+    glyphMapper.setScalarVisibility(true)
+    glyphMapper.setColorByArrayName(magName)
+    glyphMapper.setScalarModeToUsePointFieldData()
+
+    const bar = vtkScalarBarActor.newInstance()
+    bar.setScalarsToColors(ctf)
+    bar.setAxisLabel(props.vectorName + ' Magnitude')
+    renderer.addActor(bar)
+  }
+
+  const actor = vtkActor.newInstance()
+  actor.setMapper(glyphMapper)
+  actor.getProperty().setAmbient(0.5)
+  actor.getProperty().setDiffuse(0.5)
+  renderer.addActor(actor)
+
+  currentGlyphMapper = glyphMapper
+  currentVectorMaxMag = vecInfo.maxMagnitude
 }
 
 async function loadFromFile() {
@@ -268,9 +378,26 @@ async function loadFromFile() {
     reader.parseAsArrayBuffer(vtpBuffer)
     const polydata = reader.getOutputData(0)
 
+    // Identify scalars/vectors so parent UI can offer vector-mode toggle
+    const info = inspectAndSynthesize(polydata)
+    emit('arrays-detected', { scalars: info.scalars, vectors: info.vectors })
+
+    currentPolydata = polydata
+    currentGlyphMapper = null
+    currentVectorMaxMag = null
+
     const renderer = fullScreenRenderer.getRenderer()
     const renderWindow = fullScreenRenderer.getRenderWindow()
     renderer.removeAllViewProps()
+
+    // Vector mode short-circuit: use the same renderVector path as loadData()
+    if (props.renderMode === 'vector' && props.vectorName) {
+      renderVector(polydata, info)
+      renderer.resetCamera()
+      renderWindow.render()
+      statusMsg.value = ''
+      return
+    }
 
     const mapper = vtkMapper.newInstance()
     mapper.setInputData(polydata)
@@ -338,6 +465,19 @@ async function loadFromFile() {
     console.error('VtkViewer loadFromFile error:', err)
   }
 }
+
+// Capture the current render as a PNG data URL. Used by frame-sequence
+// export (parent drives setFrame → waits 'loaded' → calls captureFrame).
+async function captureFrame() {
+  if (!fullScreenRenderer) return null
+  const renderWindow = fullScreenRenderer.getRenderWindow()
+  renderWindow.render()
+  const images = renderWindow.captureImages('image/png')
+  if (!images || !images.length) return null
+  return await images[0]
+}
+
+defineExpose({ captureFrame })
 </script>
 
 <template>
@@ -349,6 +489,7 @@ async function loadFromFile() {
     </div>
     <div class="viewer-container" ref="containerRef">
       <div v-if="statusMsg" class="viewer-overlay">{{ statusMsg }}</div>
+      <div v-if="vectorHint" class="vector-hint">{{ vectorHint }}</div>
       <div class="viewer-hints">
         <span class="hint-item">Drag: Rotate</span>
         <span class="hint-sep">|</span>
@@ -445,5 +586,19 @@ async function loadFromFile() {
 .hint-sep {
   color: rgba(255, 255, 255, 0.2);
   font-size: 11px;
+}
+
+.vector-hint {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(180, 120, 0, 0.85);
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 2;
+  white-space: nowrap;
 }
 </style>

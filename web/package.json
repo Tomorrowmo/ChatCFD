@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@kitware/vtk.js": "^35.5.2",
+    "gifenc": "^1.0.3",
+    "jszip": "^3.10.1",
     "vue": "^3.5.30"
   },
   "devDependencies": {
