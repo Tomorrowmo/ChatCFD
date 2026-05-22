@@ -24,7 +24,7 @@ MODEL = os.environ.get("MODEL_ID", "openai/qwen-plus")
 MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8001/mcp/sse")
 MEMPALACE_ENABLED = os.environ.get("MEMPALACE_ENABLED", "true").lower() == "true"
 LOG_DIR = os.environ.get("LOG_DIR", ".chatcfd")
-AGENT_PORT = int(os.environ.get("AGENT_PORT", "8080"))
+AGENT_PORT = int(os.environ.get("AGENT_PORT", "8090"))
 SETTINGS_FILE = os.path.join(LOG_DIR, "settings.json")
 
 # --- Shared state (initialized before server starts) ---
@@ -227,7 +227,17 @@ async def websocket_endpoint(ws: WebSocket):
                             pass
                         break
                 else:
+                    # active_task finished while ws_receive is still pending.
+                    # cancel() only *requests* cancellation — we must await the
+                    # future so the underlying recv() fully unwinds before the
+                    # outer loop calls ws.receive_text() again. Otherwise:
+                    # "cannot call recv while another coroutine is already
+                    # waiting for the next message".
                     ws_receive.cancel()
+                    try:
+                        await ws_receive
+                    except BaseException:
+                        pass
 
             insight_log.log_query(
                 LOG_DIR, conv_id, query,
