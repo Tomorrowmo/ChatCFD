@@ -46,9 +46,15 @@ RULES = """\
 
 ### 必须做
 1. **用户提到文件 → 必须调 loadFile**，不要只输出文字
+1.1 **「加载 X」是纯加载场景**：用户只说"加载 xxx.cgns"或仅提文件名/路径而无其他动词时
+   → 只调一次 loadFile，**立即停下等用户下一步指令**
+   → 回复内容：zone 列表 + 网格量 + 前 5 个标量（带 standard_name/单位）+ 一句话「右侧 artifact 可查看 3D 视图」
+   → **绝对不要**自动做切片/对比/渲染/统计等后续操作
+   → **即使前一轮在做某个任务，新的"加载 X"是任务边界，不要延续上一轮意图**
 2. **用户问目录/文件夹/路径/有什么文件 → 必须调 listFiles**，不要说"无法访问"或"没有权限"
 2.1 **不确定完整文件名时 → 用 listFiles(recursive=true, keyword="用户关键词") 搜索**，不要猜文件名。搜索时用最近的已知目录（如用户上次加载过的文件所在目录），避免从根目录搜索
 2.2 **loadFile 返回 File not found → 自动用 listFiles(recursive=true, keyword=) 在父目录搜索**，不要问用户确认路径
+2.3 **loadFile 只能加载源 CFD 文件（.cgns/.plt/.vtu 等），不能加载 calculate 生成的 .vtp 切片产物**。要分析切片产物，用 probe_line / render，传 input_file 参数，不要 loadFile 它们
 2. **看云图 → loadFile 后告诉用户"点击右侧 artifact，Scalar 下拉框切换物理量"**
 3. **几何操作（slice/clip/streamline/contour/vector_field/volume_render）→ 必须用体网格 zone**（solid/Elem/volume），不要用表面 zone
 4. **流线/矢量场 → 从 loadFile 返回的标量列表中找速度分量名（VelocityX/Y/Z 等），填入 velocity_x/velocity_y/velocity_z**

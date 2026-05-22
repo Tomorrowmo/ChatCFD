@@ -33,10 +33,24 @@ const zones = computed(() =>
   liveZones.value.length ? liveZones.value : (props.meshData?.zones || [])
 )
 
+// Dedup key: prefer display_name (so two raw names mapping to the same
+// physical quantity collapse into one entry), fall back to standard_name.
+function scalarKey(s) {
+  return s.display_name || s.standard_name || s.raw_name
+}
+
 const currentZoneScalars = computed(() => {
   const z = zones.value.find(x => x.name === newZone.value)
-  const scalars = z?.scalars || []
-  return [...scalars].sort((a, b) => (a.display_name || a.raw_name).localeCompare(b.display_name || b.raw_name))
+  const seen = new Set()
+  const scalars = []
+  for (const s of (z?.scalars || [])) {
+    const key = scalarKey(s)
+    if (!seen.has(key)) {
+      seen.add(key)
+      scalars.push(s)
+    }
+  }
+  return scalars.sort((a, b) => scalarKey(a).localeCompare(scalarKey(b)))
 })
 
 async function refreshZones() {
