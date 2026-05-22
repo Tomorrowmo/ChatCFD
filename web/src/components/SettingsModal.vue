@@ -1,10 +1,11 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { AGENT_HTTP_URL } from '../config.js'
 
 const emit = defineEmits(['close'])
 
 const SETTINGS_KEY = 'chatcfd.settings.v1'
-const AGENT_URL = 'http://localhost:8080'
+const AGENT_URL = AGENT_HTTP_URL
 
 const MODELS = [
   'openai/gpt-4o-mini',

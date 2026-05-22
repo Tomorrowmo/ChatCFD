@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { useChatStore } from '../stores/chat.js'
+import { AGENT_WS_URL } from '../config.js'
 
-const AGENT_WS_URL = 'ws://localhost:8080/ws'
 const MOCK_MODE = false // Set to true for frontend-only development
 
 function formatArgsHint(tool, args) {
