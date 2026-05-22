@@ -96,8 +96,10 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     if len(values) == 0:
         return {"error": "Probe line is entirely outside the mesh. Adjust point1/point2."}
 
-    file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
-    output_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
+    output_dir = kwargs.get("output_dir") or os.path.join(
+        os.path.dirname(post_data.file_path),
+        os.path.splitext(os.path.basename(post_data.file_path))[0],
+    )
     plot_dir = os.path.join(output_dir, "Plot")
     os.makedirs(plot_dir, exist_ok=True)
 

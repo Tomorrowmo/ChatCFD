@@ -2,6 +2,7 @@
 
 import csv
 import os
+import re
 
 import vtk
 
@@ -9,6 +10,20 @@ from post_service.algorithm_registry import AlgorithmRegistry
 from post_service.archive import AnalysisArchive
 from post_service.post_data import PostData
 from post_service.session import FrameSequence, MultiFileFrameSequence, SessionManager
+
+
+def _session_output_dir(file_path: str, session_id: str) -> str:
+    """Per-session product directory: <file dir>/<file stem>/<session seg>.
+
+    Calculation outputs (.vtp/.png/.gif/.csv) go here. The trailing session
+    segment isolates concurrent terminals — two sessions loading the same
+    file no longer overwrite each other's products.
+    """
+    stem = os.path.splitext(os.path.basename(file_path))[0]
+    seg = re.sub(r"[^A-Za-z0-9_.-]", "_", session_id or "default") or "default"
+    return os.path.normpath(
+        os.path.join(os.path.dirname(file_path), stem, seg)
+    ).replace("\\", "/")
 
 
 class PostEngine:
@@ -118,7 +133,7 @@ class PostEngine:
             state = self.session_mgr.create(session_id)
         state.post_data = frame0
         state._sequence_map[dir_path] = sequence
-        state.output_dir = dir_path
+        state.output_dir = _session_output_dir(dir_path, session_id)
 
         # Return single-file compatible summary
         summary = frame0.get_summary()
@@ -201,8 +216,7 @@ class PostEngine:
         state.post_data = frame0
         state._sequence_map[file_path] = sequence
 
-        file_stem = os.path.splitext(os.path.basename(file_path))[0]
-        state.output_dir = os.path.join(os.path.dirname(file_path), file_stem)
+        state.output_dir = _session_output_dir(file_path, session_id)
         summary = frame0.get_summary()
         summary["frame_count"] = time_count
         summary["time_labels"] = time_labels
@@ -236,6 +250,7 @@ class PostEngine:
             result = entry["execute"](
                 state.post_data, merged, zone_name or "",
                 sequence=sequence, frame_count=frame_count, time_labels=time_labels,
+                output_dir=state.output_dir,
             )
         except Exception as e:
             traceback.print_exc()
@@ -297,6 +312,7 @@ class PostEngine:
         pd = state.post_data
         if format == "csv":
             points = pd.get_points(zone)
+            os.makedirs(state.output_dir, exist_ok=True)
             output_path = os.path.join(state.output_dir, f"{zone}_export.csv")
             output_path = os.path.normpath(output_path).replace("\\", "/")
             with open(output_path, "w", newline="") as f:

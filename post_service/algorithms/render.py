@@ -201,7 +201,7 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     geo.Update()
     polydata = geo.GetOutput()
 
-    render_dir = _make_render_dir(post_data)
+    render_dir = _make_render_dir(post_data, session_output_dir=kwargs.get("output_dir"))
     zone_label = zone_name or "all"
     scalar_label = params.get("scalar") or "geometry"
     out_path = os.path.normpath(
@@ -270,10 +270,12 @@ def _render_multiblock(mb, params, input_file, post_data):
     }
 
 
-def _make_render_dir(post_data, input_file=None):
+def _make_render_dir(post_data, input_file=None, session_output_dir=None):
     """Create and return the Render output directory."""
     if input_file:
         base_dir = os.path.dirname(input_file)
+    elif session_output_dir:
+        base_dir = session_output_dir
     else:
         file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
         base_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)

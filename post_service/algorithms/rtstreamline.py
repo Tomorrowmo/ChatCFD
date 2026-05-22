@@ -209,8 +209,10 @@ def _execute_transient(post_data, params: dict, zone_name: str, **kwargs) -> dic
         }
 
     # --- 7. Save as VTP (per-frame) ---
-    file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
-    output_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
+    output_dir = kwargs.get("output_dir") or os.path.join(
+        os.path.dirname(post_data.file_path),
+        os.path.splitext(os.path.basename(post_data.file_path))[0],
+    )
     sl_dir = os.path.join(output_dir, "Streamline")
     os.makedirs(sl_dir, exist_ok=True)
 

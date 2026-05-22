@@ -133,8 +133,10 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
         return {"error": "Vector field produced empty result. Check box range covers the domain."}
 
     # --- 7. Save as VTP (per-frame) ---
-    file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
-    output_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
+    output_dir = kwargs.get("output_dir") or os.path.join(
+        os.path.dirname(post_data.file_path),
+        os.path.splitext(os.path.basename(post_data.file_path))[0],
+    )
     vf_dir = os.path.join(output_dir, "VectorField")
     os.makedirs(vf_dir, exist_ok=True)
 

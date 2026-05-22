@@ -115,8 +115,10 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
             multiblock.SetBlock(i, block)
 
     # Write output VTM file
-    file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
-    file_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
+    file_dir = kwargs.get("output_dir") or os.path.join(
+        os.path.dirname(post_data.file_path),
+        os.path.splitext(os.path.basename(post_data.file_path))[0],
+    )
     out_dir = os.path.normpath(os.path.join(file_dir, "VelocityGradient")).replace("\\", "/")
     os.makedirs(out_dir, exist_ok=True)
     out_path = out_dir + "/res.vtm"

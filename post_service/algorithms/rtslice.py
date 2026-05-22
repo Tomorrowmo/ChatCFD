@@ -8,35 +8,42 @@ import os
 import vtk
 
 NAME = "slice"
-DESCRIPTION = """沿 X/Y/Z 轴生成多个**等距**平行切片截面。需体网格 zone。
+DESCRIPTION = """沿 X/Y/Z 轴生成切片截面。需体网格 zone。两种模式：
+
+**模式 A：任意位置（推荐用于"对比 x=2,5,10"这类需求）**
+  positions=[2, 5, 10] → 一次调用切 3 个指定位置。优先用本模式，避免无谓的
+  自动等距首次调用。模式 A 默认 output_images=False（用户要的是数据，不是动画）。
+
+**模式 B：等距区间（适合扫描动画）**
+  n_slices + start/end → 在 [start, end] 内等距分布 n_slices 个平面。
+  start/end 不传则自动取 zone bbox 全范围。例：n_slices=3 自动 bounds 时
+  会切到 [-126, 144] 之类全域，不是用户想要的特定位置。
+  默认 output_images=True 生成 GIF 动画。
 
 参数：
 - direction: 0=X, 1=Y, 2=Z（也接受字符串 'x','y','z'）
-- n_slices: 切片数量，默认 3
-- start/end: 该轴方向的位置范围；不传则自动取 zone bbox 全范围
-- scalar: 着色用标量；不传则自动选第一个可用标量
-- output_images: 是否同时渲染每个切片为 PNG 并合成 GIF 动画。默认 True（仅当
-  n_slices > 1 生效）。用户明确只要 VTP 时传 False 可跳过渲染。
+- positions: list[float] 任意位置；给了就走模式 A，会忽略 n_slices/start/end
+- n_slices: 模式 B 切片数，默认 3
+- start/end: 模式 B 位置范围
+- scalar: 着色标量；不传则自动选第一个可用标量
+- output_images: 是否渲染 PNG + 合成 GIF；模式 A 默认 False，模式 B 默认 True
 - image_width / image_height: 渲染分辨率，默认 1280x720
 
-关键限制（LLM 请严格遵守）：
-- **只支持等距切片**。切 n_slices 个平面在 [start, end] 区间内等距分布。
-- **没有 position / positions / individual_planes / save_images / image_format
-  这类参数**——不要猜。要生成 GIF 用 output_images=True（默认已开）。
-- 想切 x=2,5,10 三个**非等距**位置 → **调 3 次本工具**，每次
-  start=end=目标位置, n_slices=1。例：slice(start=2, end=2, n_slices=1, direction=0)
-- 想切 x=2 到 10 之间 3 个等距位置（2, 6, 10） → 一次调用：
-  slice(start=2, end=10, n_slices=3, direction=0)
+关键约束（LLM 请严格遵守）：
+- **想切非等距具体位置 → 必须用 positions 参数，禁止用 n_slices=3 + 自动 bounds**
+- **没有 position（单数）/ individual_planes / save_images 等其他键名**——不要猜
+- 多帧文件不支持 positions，请单帧使用
 
 输出 .vtp 文件（可在前端 3D 场景叠加显示）+ 可选 PNG 序列 + GIF 动画。
 不适用：任意斜切面（本算法只做轴对齐）。"""
 DEFAULTS = {
     "scalar": None,      # scalar for coloring (None = auto-pick first available)
     "direction": 0,      # 0=X, 1=Y, 2=Z (also accepts 'x','y','z')
-    "n_slices": 3,       # number of slice planes
-    "start": None,       # start position along axis (None = auto from bounds)
-    "end": None,         # end position along axis (None = auto from bounds)
-    "output_images": True,   # render each plane to PNG + combine GIF (n_slices>1 only)
+    "positions": None,   # list[float] arbitrary positions (Mode A); takes priority over n_slices
+    "n_slices": 3,       # Mode B equidistant count
+    "start": None,       # Mode B range start (None = auto from bounds)
+    "end": None,         # Mode B range end (None = auto from bounds)
+    "output_images": None,   # None = auto (False for Mode A, True for Mode B); explicit bool overrides
     "image_width": 1280,
     "image_height": 720,
 }
@@ -118,21 +125,56 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
         return {"error": f"Failed to build RomtekPostDataSet: {e}"}
 
     # --- 5. Configure and run filter ---
-    n_slices = int(params.get("n_slices", 3))
+    # Mode A: explicit positions list (takes priority); Mode B: equidistant range.
+    raw_positions = params.get("positions")
+    mode_positions: list[float] | None = None
+    if raw_positions is not None:
+        if not isinstance(raw_positions, (list, tuple)) or not raw_positions:
+            return {"error": "positions must be a non-empty list, e.g. [2, 5, 10]"}
+        if frame_count > 1:
+            return {"error": "positions parameter not supported for multi-frame files; "
+                             "load a single frame or use Mode B (n_slices + start/end)."}
+        try:
+            mode_positions = [float(p) for p in raw_positions]
+        except (TypeError, ValueError):
+            return {"error": f"positions contains non-numeric value: {raw_positions!r}"}
 
-    print(f"[rtslice] Running SliceFilter: n_slices={n_slices}, scalar={resolved_scalar}, dir={direction}, range=[{start}, {end}]")
-
-    try:
-        filt = vtk.SliceFilter()
-        filt.SetInput(rpds)
-        filt.SetSliceGeneNum(n_slices)
-        filt.SetScalar(resolved_scalar)
-        filt.SetSliceDir(direction)
-        filt.SetStartEndPos(start, end)
-        filt.Update()
-        result_mb = filt.GetOutput()
-    except Exception as e:
-        return {"error": f"SliceFilter failed: {e}"}
+    if mode_positions is not None:
+        n_slices = len(mode_positions)
+        start = min(mode_positions)
+        end = max(mode_positions)
+        print(f"[rtslice] Mode A (positions): {mode_positions}, scalar={resolved_scalar}, dir={direction}")
+        try:
+            result_mb = vtk.vtkMultiBlockDataSet()
+            result_mb.SetNumberOfBlocks(n_slices)
+            for i, pos in enumerate(mode_positions):
+                filt = vtk.SliceFilter()
+                filt.SetInput(rpds)
+                filt.SetSliceGeneNum(1)
+                filt.SetScalar(resolved_scalar)
+                filt.SetSliceDir(direction)
+                filt.SetStartEndPos(pos, pos)
+                filt.Update()
+                single = filt.GetOutput()
+                if single is None or single.GetNumberOfBlocks() == 0:
+                    return {"error": f"SliceFilter produced no data at position {pos:g}"}
+                result_mb.SetBlock(i, single.GetBlock(0))
+        except Exception as e:
+            return {"error": f"SliceFilter failed in Mode A: {e}"}
+    else:
+        n_slices = int(params.get("n_slices", 3))
+        print(f"[rtslice] Mode B (equidistant): n_slices={n_slices}, scalar={resolved_scalar}, dir={direction}, range=[{start}, {end}]")
+        try:
+            filt = vtk.SliceFilter()
+            filt.SetInput(rpds)
+            filt.SetSliceGeneNum(n_slices)
+            filt.SetScalar(resolved_scalar)
+            filt.SetSliceDir(direction)
+            filt.SetStartEndPos(start, end)
+            filt.Update()
+            result_mb = filt.GetOutput()
+        except Exception as e:
+            return {"error": f"SliceFilter failed: {e}"}
 
     # --- 6. Extract per-frame outputs ---
     # SliceFilter returns n_slices blocks per frame; merge within each frame
@@ -156,8 +198,10 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
 
     # --- 7. Save as VTP ---
     dir_label = "XYZ"[direction]
-    file_stem = os.path.splitext(os.path.basename(post_data.file_path))[0]
-    output_dir = os.path.join(os.path.dirname(post_data.file_path), file_stem)
+    output_dir = kwargs.get("output_dir") or os.path.join(
+        os.path.dirname(post_data.file_path),
+        os.path.splitext(os.path.basename(post_data.file_path))[0],
+    )
     slice_dir = os.path.join(output_dir, "Slice")
     os.makedirs(slice_dir, exist_ok=True)
 
@@ -192,7 +236,13 @@ def execute(post_data, params: dict, zone_name: str, **kwargs) -> dict:
     n_cells = first_output.GetNumberOfCells() if first_output else 0
 
     # --- 8. Render images + GIF if requested ---
-    output_images = params.get("output_images", False)
+    # output_images default depends on mode: Mode A (positions) defaults False,
+    # Mode B (equidistant) defaults True. Explicit True/False from caller wins.
+    output_images_param = params.get("output_images")
+    if output_images_param is None:
+        output_images = mode_positions is None  # Mode B default True, Mode A default False
+    else:
+        output_images = bool(output_images_param)
     gif_path = None
     image_paths = []
 
