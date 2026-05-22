@@ -3,6 +3,7 @@ import { ref, nextTick, watch, onMounted, computed } from 'vue'
 import MessageBubble from './MessageBubble.vue'
 import { useChatStore } from '../stores/chat.js'
 import { useWebSocket } from '../composables/useWebSocket.js'
+import { POST_SERVICE_URL } from '../config.js'
 
 const store = useChatStore()
 const { activeConversation, activeMessages, addMessage, createConversation, activeArtifacts } = store
@@ -11,6 +12,22 @@ const ws = useWebSocket()
 const inputText = ref('')
 const messageListRef = ref(null)
 const isDragging = ref(false)
+
+// Welcome screen: built-in sample cases + device detection
+const samples = ref([])
+const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(
+  typeof navigator !== 'undefined' ? navigator.userAgent : ''
+)
+
+// What ChatCFD can do — shown on the welcome screen
+const capabilities = [
+  '加载并查看 CFD 网格与物理场（压力、速度、温度…）',
+  '气动力分析：升力 / 阻力 / 力矩、升阻比',
+  '流场分析：涡量、压力系数 Cp、马赫数',
+  '切面 / 裁剪 / 流线 / 等值面 / 矢量场 / 体渲染',
+  '标量统计、数据质量检查、沿线采样、算例对比',
+  '一键生成分析报告，导出 CSV',
+]
 
 // Track if agent is currently processing
 const isProcessing = computed(() => {
@@ -43,17 +60,40 @@ function onDrop(e) {
 const title = computed(() => activeConversation.value?.title || 'ChatCFD')
 const messages = activeMessages
 
-onMounted(() => {
+onMounted(async () => {
   ws.connect()
+  // Load built-in sample cases for the welcome screen
+  try {
+    const resp = await fetch(`${POST_SERVICE_URL}/api/samples`)
+    if (resp.ok) {
+      const data = await resp.json()
+      samples.value = data.samples || []
+    }
+  } catch (e) {
+    console.warn('[ChatPanel] Failed to load samples:', e)
+  }
 })
 
-// Detect file paths in text (e.g., "D:\path\file.cgns" or "D:/path/file.plt")
+// Load a built-in sample case — sends a load request as if the user typed it
+function loadSample(sample) {
+  const text = `加载并分析示例数据 "${sample.path}"`
+  addMessage('user', text)
+  ws.send(text)
+  isAtBottom.value = true
+  nextTick(() => scrollToBottom())
+}
+
+// Detect file paths in text. Matches the four common shapes ChatCFD users type:
+//   "D:\path\file.cgns"      — quoted (any style)
+//   D:\path\file.cgns        — Windows absolute, drive letter
+//   tests/data/ysy/ysy.cgns  — relative path with separators
+//   ysy.cgns                 — bare filename
 const FILE_EXTS = ['.cgns', '.cga', '.plt', '.dat', '.case', '.vtm', '.vts', '.vtu', '.vtp']
 function detectFilePath(text) {
-  // Match quoted paths or bare paths with known extensions
   const patterns = [
-    /"([^"]+\.\w+)"/,           // "D:\path\file.cgns"
-    /([A-Z]:[/\\][^\s"]+\.\w+)/i,  // D:\path\file.cgns (unquoted)
+    /"([^"]+\.\w+)"/,                                       // quoted
+    /([A-Z]:[/\\][^\s"]+\.\w+)/i,                           // Windows absolute
+    /(?:^|\s)([\w./\\-]+\.\w+)(?=\s|$|[,;:.，；：。])/,    // relative or bare
   ]
   for (const p of patterns) {
     const m = text.match(p)
@@ -176,10 +216,43 @@ function stopProcessing() {
     </div>
 
     <div class="message-list" ref="messageListRef" @scroll="checkAtBottom">
-      <div v-if="messages.length === 0" class="empty-state">
-        <p class="empty-title">Welcome to ChatCFD</p>
-        <p class="empty-hint">Ask questions about your CFD simulation data.</p>
-        <p class="empty-hint">Try: "Load the case file" or "Calculate forces on the wall zone"</p>
+      <div v-if="messages.length === 0" class="welcome">
+        <p class="welcome-title">你好，我是 ChatCFD 👋</p>
+        <p class="welcome-sub">CFD 仿真数据智能分析助手。用自然语言对话，我帮你分析和可视化。</p>
+
+        <div class="welcome-section">
+          <p class="welcome-label">我能做什么</p>
+          <ul class="capability-list">
+            <li v-for="(cap, i) in capabilities" :key="i">{{ cap }}</li>
+          </ul>
+        </div>
+
+        <div class="welcome-section">
+          <p class="welcome-label">想直接体验？用示例数据试试</p>
+          <div v-if="samples.length" class="sample-grid">
+            <button
+              v-for="s in samples"
+              :key="s.id"
+              class="sample-card"
+              @click="loadSample(s)"
+            >
+              <span class="sample-name">{{ s.label }}</span>
+              <span class="sample-desc">{{ s.desc }}</span>
+              <span class="sample-size">{{ s.size_mb }} MB</span>
+            </button>
+          </div>
+          <p v-else class="welcome-hint">（未找到内置示例数据）</p>
+        </div>
+
+        <div class="welcome-section">
+          <p v-if="!isMobile" class="welcome-hint">
+            数据就在运行 ChatCFD 的这台电脑上？直接把完整文件路径发给我，例如
+            <code>D:\data\case.cgns</code>。
+          </p>
+          <p v-else class="welcome-hint">
+            在手机上建议先用上面的示例数据体验各项能力。
+          </p>
+        </div>
       </div>
       <MessageBubble
         v-for="msg in messages"
@@ -260,24 +333,116 @@ function stopProcessing() {
   gap: 12px;
 }
 
-.empty-state {
+.welcome {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  gap: 8px;
-  color: var(--text-muted);
+  gap: 20px;
+  max-width: 600px;
+  width: 100%;
+  margin: 24px auto;
 }
 
-.empty-title {
-  font-size: 20px;
-  font-weight: 500;
+.welcome-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.welcome-sub {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.welcome-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.welcome-label {
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-secondary);
 }
 
-.empty-hint {
+.capability-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.capability-list li {
   font-size: 13px;
+  color: var(--text-secondary);
+  padding-left: 18px;
+  position: relative;
+  line-height: 1.5;
+}
+
+.capability-list li::before {
+  content: '▸';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+
+.sample-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sample-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 200px;
+  text-align: left;
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.sample-card:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-secondary));
+}
+
+.sample-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sample-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.sample-size {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.welcome-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.welcome-hint code {
+  background: var(--bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
 .input-area {
