@@ -85,6 +85,21 @@ function loadSample(sample) {
   nextTick(() => scrollToBottom())
 }
 
+// "完整分析" — load + send a short intent message. The actual analysis
+// recipe lives in skills.py (system prompt); the agent matches file_path
+// against its built-in playbook and executes the corresponding flow.
+function loadAndAnalyze(sample) {
+  if (!sample.analysis_prompt) {
+    loadSample(sample)
+    return
+  }
+  const text = `加载示例数据 "${sample.path}"，${sample.analysis_prompt}`
+  addMessage('user', text)
+  ws.send(text)
+  isAtBottom.value = true
+  nextTick(() => scrollToBottom())
+}
+
 // Detect file paths in text. Matches the four common shapes ChatCFD users type:
 //   "D:\path\file.cgns"      — quoted (any style)
 //   D:\path\file.cgns        — Windows absolute, drive letter
@@ -237,16 +252,23 @@ function stopProcessing() {
         <div class="welcome-section">
           <p class="welcome-label">想直接体验？用示例数据试试</p>
           <div v-if="samples.length" class="sample-grid">
-            <button
+            <div
               v-for="s in samples"
               :key="s.id"
               class="sample-card"
-              @click="loadSample(s)"
             >
-              <span class="sample-name">{{ s.label }}</span>
-              <span class="sample-desc">{{ s.desc }}</span>
-              <span class="sample-size">{{ s.size_mb }} MB</span>
-            </button>
+              <button class="sample-main" @click="loadSample(s)">
+                <span class="sample-name">{{ s.label }}</span>
+                <span class="sample-desc">{{ s.desc }}</span>
+                <span class="sample-size">{{ s.size_mb }} MB</span>
+              </button>
+              <button
+                v-if="s.analysis_prompt"
+                class="sample-analyze"
+                @click="loadAndAnalyze(s)"
+                title="加载后自动按这个案例的预设序列做完整分析"
+              >完整分析</button>
+            </div>
           </div>
           <p v-else class="welcome-hint">（未找到内置示例数据）</p>
         </div>
@@ -411,20 +433,47 @@ function stopProcessing() {
 .sample-card {
   display: flex;
   flex-direction: column;
-  gap: 4px;
   flex: 1;
   min-width: 200px;
-  text-align: left;
-  padding: 12px 14px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 8px;
+  overflow: hidden;
   transition: border-color 0.15s, background 0.15s;
 }
 
 .sample-card:hover {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 6%, var(--bg-secondary));
+}
+
+.sample-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  width: 100%;
+}
+
+.sample-analyze {
+  padding: 8px 14px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  border-top: 1px solid var(--border);
+  transition: background 0.15s;
+}
+
+.sample-analyze:hover {
+  background: var(--accent-hover);
 }
 
 .sample-name {

@@ -127,6 +127,110 @@ RULES = """\
 6. 用户说"这个项目叫XX"时，更新当前 wing 名称"""
 
 
+SAMPLES = """\
+## 内置示例数据 — 完整分析流程
+
+每个内置示例数据都对应一套针对性的"完整分析流程"。当用户对该案例表达「完整分析 / 全面分析 / 做完整分析 / 完整气动分析 / 完整热分析」等意图时，按对应文件路径下的流程**严格顺序**执行：不要询问用户参数、不要跳步、每步对应一次 calculate。
+
+---
+
+### 案例 A：tests/data/ysy/ysy.cgns —— 升力体航天器外流
+
+**数据特征**
+- 外形：升力体航天器（尖头、扁机身、带垂直安定面，HTV 类高超声速再入飞行器形态）
+- zones：`solid`（体网格）+ `wall`（外表面）+ `far`（远场）
+- 已含标量：Cp / Mach / Pressure / VelocityX/Y/Z / Temperature
+- 通常机身纵向沿 X 最长、纵向对称面在 Y=0、Z 为竖直方向（可从 bbox 长宽比验证）
+
+**通用约束**
+- 禁止用 velocity_gradient 重算 Cp/Mach（数据已含）
+- 渲染优先 Cp / Mach（无量纲），不要 Pressure（绝对值不直观）
+- streamline 用 seed_strategy=inlet（外流来流方向明确，比 auto 稳）
+- 升力体气动特征：下表面（迎风）高压、上表面（背风）低压；尖头驻点压力最高且 Mach 最低；背风面常见分离涡
+
+**完整分析流程**
+
+第一阶段·物理量可视化（无需额外参数，直接跑）：
+  1) calculate method=render scalar=Cp on `wall` zone
+  2) calculate method=render scalar=Mach on `wall` zone
+  3) calculate method=slice scalar=Mach direction=1 on `solid` zone（Y 切片沿纵向对称面，看头部驻点 + 沿机身 Mach 演化 — 升力体最关键切面）
+  4) calculate method=slice scalar=Pressure direction=2 on `solid` zone（Z 切片横切机身，看侧视压力场和上下表面压差）
+  5) calculate method=streamline on `solid` zone, params={"seed_strategy":"inlet"}
+
+第二阶段·从 far zone 自动估算来流参考量：
+  6) calculate method=statistics on `far` zone scalar=Pressure → 记 mean 为 p∞
+  7) calculate method=statistics on `far` zone scalar=Temperature → 记 mean 为 T∞
+  8) calculate method=statistics on `far` zone scalar=VelocityX → 记 mean 为 Vx
+  9) calculate method=statistics on `far` zone scalar=VelocityY → 记 mean 为 Vy
+  10) calculate method=statistics on `far` zone scalar=VelocityZ → 记 mean 为 Vz
+  11) 在对话中直接心算：
+       V∞ = sqrt(Vx² + Vy² + Vz²)
+       ρ∞ = p∞ / (287 × T∞)   （空气理想气体，R=287 J/(kg·K)）
+
+第三阶段·工程系数与报告：
+  12) calculate method=force_moment on `wall` zone, params={"ref_area":1.0, "ref_density":<ρ∞>, "ref_velocity":<V∞>}
+  13) 用 markdown 给出分析报告，必须包含：
+      - 来流估算：p∞ / T∞ / V∞ / ρ∞ / **Mach∞** = V∞ / sqrt(1.4·287·T∞)（直接判定速度区间：M<0.7 亚音速 / 0.7-1.2 跨音速 / 1.2-5 超音速 / >5 高超声速）
+      - 头部驻点 / 高压区位置与 Cp 数值
+      - 上表面吸力区 Cp 极小值与位置
+      - 壁面 Mach 最大值位置（升力体气动热关键区）
+      - 流场附着 / 分离情况（重点看背风面有无分离涡）
+      - 工程系数 CL / CD / CM 和升阻比 **L/D**（升力体关键性能指标，注明 ref_area=1.0）
+
+---
+
+### 案例 B：tests/data/X37b/x37b-02.cgns —— 高超声速飞行器
+
+**数据特征**
+- zones：`solid` + `tri`（表面）+ 远场
+- 数据量大（~480MB），单次加载耗时长，避免重复 loadFile
+
+**通用约束**
+- 与 ysy 不同：本案例 Mach / Cp 通常**未预算**，需 velocity_gradient 生成
+
+**完整分析流程**
+
+第一阶段·派生物理量：
+  1) calculate method=velocity_gradient on `solid` zone（生成 Mach / Cp / 声速）
+
+第二阶段·从远场估来流（同 ysy 案例第二阶段方法）：
+  2-6) 顺序对 `far` zone 调 statistics 取 Pressure / Temperature / VelocityX/Y/Z 的 mean
+  7) 心算 V∞ 和 ρ∞
+
+第三阶段·气动力与可视化：
+  8) calculate method=force_moment on `tri` zone, params={"ref_area":1.0, "ref_density":<ρ∞>, "ref_velocity":<V∞>}
+  9) calculate method=slice scalar=Mach direction=0 on `solid` zone（X 切片看激波结构）
+  10) calculate method=render scalar=Pressure on `tri` zone
+
+第四阶段·报告：
+  11) markdown 报告：气动力系数 CL/CD/CM、激波位置、Mach 分布特征、来流估算
+
+---
+
+### 案例 C：aeroheating_142.0s.dat（路径含 `aeroheating`）—— 再入飞行器气动加热
+
+**数据特征**
+- **仅表面网格（FEQuadrilateral），无体网格、无速度场**
+- 物理量：qw（壁面热流，关键）/ pe（壁面压力）/ hre（焓）
+- zone 命名约定：`bf`=背风、`yf`=迎风、`qianyuan`=前缘、`dibu`=底部、`ceban`=侧板
+
+**通用约束**
+- ⚠️ 禁止 slice / clip / streamline / contour / velocity_gradient（无体网格或速度场，必失败）
+- force_moment 不适用（无来流速度）
+
+**完整分析流程**
+
+  1) 对每个 zone 调 calculate method=statistics scalar=qw，记录各 zone 的 qw_max 和 mean
+  2) 找出 qw_max 最大的 2-3 个 zone（即热流峰值位置）
+  3) 对热流最高的几个 zone 做 calculate method=render scalar=qw
+  4) 识别迎风（名含 `yf`）和背风（名含 `bf`）zone，用 calculate method=compare 对比它们的 qw
+  5) markdown 热环境分析报告，必须包含：
+     - 峰值热流位置和 qw_max 数值
+     - 最热 / 最凉 zone 列表
+     - 迎风 vs 背风 zone 的 qw 差异
+     - 各部位（前缘 qianyuan / 底部 dibu / 侧板 ceban）的热环境特征"""
+
+
 def build_system_prompt() -> str:
     """Build the complete system prompt from structured sections."""
-    return f"{ROLE}\n\n{TOOLS}\n\n{RULES}"
+    return f"{ROLE}\n\n{TOOLS}\n\n{RULES}\n\n{SAMPLES}"
