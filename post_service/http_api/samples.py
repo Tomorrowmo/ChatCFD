@@ -35,7 +35,7 @@ _SAMPLES = [
         "id": "aeroheating",
         "label": "再入飞行器气动加热",
         "desc": "再入飞行器壁面热流（~9MB Tecplot），t=142s。仅表面网格，含 qw/pe/hre",
-        "abs_path": "D:/XField/data/fromyu/lire/heat/heat/aeroheating_142.0s.dat",
+        "rel_path": "tests/data/aeroheating/aeroheating_142.0s.dat",
         "kind": "aeroheating_surface",
         "analysis_prompt": "对这个再入气动加热算例做完整热环境分析",
     },

@@ -5,7 +5,9 @@ linux/
 *.cgns
 *.plt
 *.vtm
-tests/data/
+# 数据文件按子目录 ignore：大算例（ysy 62MB / x37b 457MB）保留本地，小算例（aeroheating 9MB）入库
+tests/data/ysy/
+tests/data/X37b/
 
 # PRD 副本
 docs/chatcfd-prd copy.md
